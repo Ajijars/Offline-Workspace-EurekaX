@@ -11,7 +11,7 @@ import {
   ArrowLeft, Database, HardDrive, Server, Play, RefreshCw,
   CheckCircle2, XCircle, Table2, ChevronRight, ChevronDown,
   Search, Clock, Trash2, Copy, AlertTriangle, Loader2,
-  FolderOpen, Code, BarChart3,
+  FolderOpen, Code, BarChart3, Sparkles,
 } from 'lucide-react';
 import AmbientBackground from '@/components/layout/AmbientBackground';
 import Sidebar from '@/components/layout/Sidebar';
@@ -80,6 +80,9 @@ export default function DatabasesPage() {
   const [sqlSchema, setSqlSchema] = useState<any[]>([]);
   const [sqlConnStr, setSqlConnStr] = useState('mysql+aiomysql://root:root@localhost:3307/mysql');
   const [showHistory, setShowHistory] = useState(false);
+  const [aiPrompt, setAiPrompt] = useState('');
+  const [generatingSql, setGeneratingSql] = useState(false);
+  const [sources, setSources] = useState<{ id: string; name: string }[]>([{ id: 'local', name: 'Local SQLite (Default)' }]);
 
   // Error
   const [error, setError] = useState('');
@@ -87,13 +90,27 @@ export default function DatabasesPage() {
   useEffect(() => {
     checkMongoStatus();
     loadSqlHistory();
+    loadSources();
   }, []);
 
   useEffect(() => {
-    if (activeTab === 'sql' && (sqlSource === 'local' || sqlSource === 'external')) {
+    if (activeTab === 'sql' && sqlSource) {
       loadSqlTables();
     }
   }, [activeTab, sqlSource]);
+
+  const loadSources = async () => {
+    try {
+      const res = await authFetch('/api/governance/sources');
+      const data = await res.json();
+      if (res.ok && Array.isArray(data)) {
+        const sqlSources = data.filter((s: any) => s.source_type === 'sql' || s.source_type === 'csv');
+        setSources([{ id: 'local', name: 'Local SQLite (Default)' }, ...sqlSources.map((s: any) => ({ id: s.id, name: s.name }))]);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
 
   // ── MongoDB Functions ──
 
@@ -191,73 +208,66 @@ export default function DatabasesPage() {
 
   const loadSqlTables = async () => {
     try {
-      let querySql = "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';";
-      if (sqlSource === 'external') {
-        querySql = "SHOW TABLES;";
-      }
-      const res = await authFetch('/api/db/sql/execute', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          sql: querySql, 
-          source_name: sqlSource,
-          connection_string: sqlSource === 'external' ? sqlConnStr : undefined
-        }),
-      });
+      // Instead of hardcoded SHOW TABLES, we fetch the unified schema from the backend
+      const res = await authFetch(`/api/query/schema?source_id=${sqlSource}`);
       const data = await res.json();
-      if (data.success && data.rows) {
-        if (sqlSource === 'external') {
-          setSqlTables(data.rows.map((r: any) => Object.values(r)[0] as string));
-        } else {
-          setSqlTables(data.rows.map((r: any) => r.name));
-        }
+      if (res.ok && data.schema) {
+        setSqlTables(data.schema.map((t: any) => t.table_name));
+        setSqlSchema([]); // Reset columns view on source change
+        setSqlSelectedTable('');
+      } else {
+        setSqlTables([]);
+        setSqlSchema([]);
       }
-    } catch {}
+    } catch {
+      setSqlTables([]);
+    }
   };
 
   const selectSqlTable = async (table: string) => {
     setSqlSelectedTable(table);
+    // Since loadSqlTables fetched the full schema into sqlSchema, we can just find it
+    // Wait, sqlSchema currently holds the active table's columns in the old logic.
+    // Let's just find the table in our stored full schema (which we temporarily put in sqlSchema)
+    // Actually, to avoid breaking state, let's just do another fetch or use the data.
     try {
-      let querySql = `PRAGMA table_info('${table}');`;
-      if (sqlSource === 'external') {
-        querySql = `DESCRIBE ${table};`;
-      }
-      const res = await authFetch('/api/db/sql/execute', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          sql: querySql, 
-          source_name: sqlSource,
-          connection_string: sqlSource === 'external' ? sqlConnStr : undefined
-        }),
-      });
+      const res = await authFetch(`/api/query/schema?source_id=${sqlSource}`);
       const data = await res.json();
-      if (data.success && data.rows) {
-        if (sqlSource === 'external') {
-          setSqlSchema(data.rows.map((r: any) => ({ name: r.Field, type: r.Type })));
+      if (res.ok && data.schema) {
+        const found = data.schema.find((t: any) => t.table_name === table);
+        if (found) {
+          setSqlSchema(found.columns.map((c: any) => ({ name: c.name, type: c.type })));
         } else {
-          setSqlSchema(data.rows);
+          setSqlSchema([]);
         }
       }
     } catch {}
   };
 
   const runSqlQuery = async () => {
+    if (!sqlQuery.trim()) return;
     setSqlRunning(true);
     setError('');
     try {
-      const res = await authFetch('/api/db/sql/execute', {
+      const res = await authFetch('/api/query/sql', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           sql: sqlQuery, 
-          source_name: sqlSource,
-          connection_string: sqlSource === 'external' ? sqlConnStr : undefined
+          source_name: sqlSource
         }),
       });
       const data = await res.json();
-      setSqlResult(data);
-      loadSqlHistory();
+      if (!res.ok) {
+        setError(data.detail || data.error || 'Query execution failed');
+        setSqlResult({ success: false, error: data.detail || data.error });
+      } else if (!data.success) {
+        setError(data.error || 'Query execution failed');
+        setSqlResult(data);
+      } else {
+        setSqlResult(data);
+        loadSqlHistory();
+      }
     } catch (e: any) {
       setError(e.message);
     }
@@ -270,6 +280,45 @@ export default function DatabasesPage() {
       const data = await res.json();
       setSqlHistory(data.history || []);
     } catch {}
+  };
+
+  const generateSql = async () => {
+    if (!aiPrompt.trim()) return;
+    setGeneratingSql(true);
+    try {
+      // In databases page, we just pass the table names and current schema as context
+      const schemaContext = sqlSelectedTable 
+        ? [{ table: sqlSelectedTable, columns: sqlSchema }]
+        : sqlTables.map(t => ({ table: t }));
+
+      const res = await authFetch('/api/query/generate-sql', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question: aiPrompt, schema_context: schemaContext }),
+      });
+      
+      if (!res.ok) {
+        const contentType = res.headers.get('content-type');
+        if (contentType && contentType.includes('application/json')) {
+          const data = await res.json();
+          setError(`AI Error: ${data.detail || 'Failed to generate SQL'}`);
+        } else {
+          setError(`Timeout Error: The AI model took too long to respond. Please wait a moment and try again!`);
+        }
+        setGeneratingSql(false);
+        return;
+      }
+
+      const data = await res.json();
+      if (data.sql) {
+        setSqlQuery(data.sql);
+      } else {
+        setError('Received empty response from the AI model.');
+      }
+    } catch (err) {
+      setError(`Network connection failed. (${err instanceof Error ? err.message : 'Unknown error'})`);
+    }
+    setGeneratingSql(false);
   };
 
   const copyToClipboard = (text: string) => {
@@ -536,38 +585,25 @@ export default function DatabasesPage() {
                     <Server size={16} /> Connection
                   </h3>
                   <div className="db-connection-info">
-                    {sqlSource === 'local' || sqlSource === 'databricks' ? (
-                      <div className="landing-db-card" style={{ marginBottom: 0 }}>
-                        <div className="landing-db-header">
-                          <div className="landing-db-icon sql">
-                            <BarChart3 size={18} />
-                          </div>
-                          <div className="landing-db-name">
-                            <span>{sqlSource === 'local' ? 'SQLite (Local)' : 'Databricks'}</span>
-                            <span className="landing-db-type">{sqlSource === 'local' ? 'data/eurekax.db — Always available' : 'External Data Warehouse'}</span>
-                          </div>
-                          <span className="landing-db-badge connected">
-                            <CheckCircle2 size={12} /> Connected
-                          </span>
+                    <div className="landing-db-card" style={{ marginBottom: 0 }}>
+                      <div className="landing-db-header">
+                        <div className="landing-db-icon sql">
+                          <BarChart3 size={18} />
                         </div>
+                        <div className="landing-db-name">
+                          <span>{sources.find(s => s.id === sqlSource)?.name || 'Data Source'}</span>
+                          <span className="landing-db-type">{sqlSource === 'local' ? 'data/eurekax.db — Always available' : 'Data Catalog Source'}</span>
+                        </div>
+                        <span className="landing-db-badge connected">
+                          <CheckCircle2 size={12} /> Connected
+                        </span>
                       </div>
-                    ) : (
-                      <div className="db-connection-row">
-                        <input
-                          type="text"
-                          className="db-input"
-                          placeholder="mysql+aiomysql://user:pass@host:port/db"
-                          value={sqlConnStr}
-                          onChange={(e) => setSqlConnStr(e.target.value)}
-                        />
-                      </div>
-                    )}
+                    </div>
                   </div>
                 </div>
 
                 {/* SQL Table Browser */}
-                {sqlSource === 'local' && (
-                  <div className="db-section">
+                <div className="db-section">
                     <h3 className="db-section-title">
                       <FolderOpen size={16} /> Table Browser
                     </h3>
@@ -610,7 +646,6 @@ export default function DatabasesPage() {
                       </div>
                     </div>
                   </div>
-                )}
 
                 {/* SQL Query Editor */}
                 <div className="db-section">
@@ -618,6 +653,26 @@ export default function DatabasesPage() {
                     <Code size={16} /> Query Editor
                   </h3>
                   <div className="db-query-editor">
+                    {/* Ask AI */}
+                    <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+                      <input 
+                        type="text" 
+                        placeholder="Ask AI to generate a query (e.g., 'Show me all records from users')" 
+                        value={aiPrompt} 
+                        onChange={e => setAiPrompt(e.target.value)} 
+                        onKeyDown={e => { if (e.key === 'Enter') generateSql(); }}
+                        style={{ flex: 1, padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg-2)', color: 'var(--text-1)' }}
+                      />
+                      <button 
+                        className="db-run-btn" 
+                        onClick={generateSql} 
+                        disabled={generatingSql || !aiPrompt.trim()}
+                        style={{ background: 'var(--primary)', padding: '0 16px', border: 'none' }}
+                      >
+                        {generatingSql ? <Loader2 size={14} className="db-spin" /> : <><Sparkles size={14} /> Generate SQL</>}
+                      </button>
+                    </div>
+
                     <textarea
                       className="db-textarea db-sql-textarea"
                       value={sqlQuery}
@@ -634,9 +689,9 @@ export default function DatabasesPage() {
                           value={sqlSource}
                           onChange={(e) => setSqlSource(e.target.value)}
                         >
-                          <option value="local">Local SQLite</option>
-                          <option value="external">External (MySQL)</option>
-                          <option value="databricks">Databricks</option>
+                          {sources.map(s => (
+                            <option key={s.id} value={s.id}>{s.name}</option>
+                          ))}
                         </select>
                       </div>
                       <div style={{ display: 'flex', gap: 8 }}>

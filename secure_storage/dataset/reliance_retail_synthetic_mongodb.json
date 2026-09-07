@@ -1,0 +1,350 @@
+{
+  "company": {
+    "name": "Reliance Retail",
+    "note": "Synthetic data created for display/demo purposes only. Not real company data."
+  },
+  "stores": [
+    {
+      "store_id": "ST001",
+      "name": "Reliance Retail - Mumbai Central",
+      "city": "Mumbai",
+      "state": "Maharashtra",
+      "format": "Supermarket"
+    },
+    {
+      "store_id": "ST002",
+      "name": "Reliance Retail - Pune FC Road",
+      "city": "Pune",
+      "state": "Maharashtra",
+      "format": "Supermarket"
+    },
+    {
+      "store_id": "ST003",
+      "name": "Reliance Retail - Bengaluru Whitefield",
+      "city": "Bengaluru",
+      "state": "Karnataka",
+      "format": "Hypermarket"
+    },
+    {
+      "store_id": "ST004",
+      "name": "Reliance Retail - Hyderabad Hitech City",
+      "city": "Hyderabad",
+      "state": "Telangana",
+      "format": "Supermarket"
+    }
+  ],
+  "products": [
+    {
+      "product_id": "P001",
+      "name": "Tata Salt 1kg",
+      "category": "Groceries",
+      "brand": "Tata",
+      "price": 28,
+      "stock_unit": "pack"
+    },
+    {
+      "product_id": "P002",
+      "name": "Aashirvaad Atta 5kg",
+      "category": "Groceries",
+      "brand": "Aashirvaad",
+      "price": 285,
+      "stock_unit": "pack"
+    },
+    {
+      "product_id": "P003",
+      "name": "Fortune Sunflower Oil 1L",
+      "category": "Groceries",
+      "brand": "Fortune",
+      "price": 145,
+      "stock_unit": "bottle"
+    },
+    {
+      "product_id": "P004",
+      "name": "Amul Taaza Milk 1L",
+      "category": "Dairy",
+      "brand": "Amul",
+      "price": 58,
+      "stock_unit": "packet"
+    },
+    {
+      "product_id": "P005",
+      "name": "Surf Excel Matic 2kg",
+      "category": "Home Care",
+      "brand": "Surf Excel",
+      "price": 420,
+      "stock_unit": "pack"
+    },
+    {
+      "product_id": "P006",
+      "name": "Parle-G Biscuits 800g",
+      "category": "Snacks",
+      "brand": "Parle",
+      "price": 75,
+      "stock_unit": "pack"
+    },
+    {
+      "product_id": "P007",
+      "name": "Colgate Strong Teeth 200g",
+      "category": "Personal Care",
+      "brand": "Colgate",
+      "price": 125,
+      "stock_unit": "pack"
+    },
+    {
+      "product_id": "P008",
+      "name": "Dove Daily Shine Shampoo 650ml",
+      "category": "Personal Care",
+      "brand": "Dove",
+      "price": 390,
+      "stock_unit": "bottle"
+    },
+    {
+      "product_id": "P009",
+      "name": "Samsung Galaxy M15 5G",
+      "category": "Electronics",
+      "brand": "Samsung",
+      "price": 14999,
+      "stock_unit": "unit"
+    },
+    {
+      "product_id": "P010",
+      "name": "boAt Rockerz Headphones",
+      "category": "Electronics",
+      "brand": "boAt",
+      "price": 1499,
+      "stock_unit": "unit"
+    }
+  ],
+  "customers": [
+    {
+      "customer_id": "C001",
+      "name": "Aarav Mehta",
+      "city": "Mumbai",
+      "state": "Maharashtra",
+      "membership": "Premium"
+    },
+    {
+      "customer_id": "C002",
+      "name": "Priya Sharma",
+      "city": "Pune",
+      "state": "Maharashtra",
+      "membership": "Regular"
+    },
+    {
+      "customer_id": "C003",
+      "name": "Rohan Patil",
+      "city": "Pune",
+      "state": "Maharashtra",
+      "membership": "Premium"
+    },
+    {
+      "customer_id": "C004",
+      "name": "Ananya Rao",
+      "city": "Bengaluru",
+      "state": "Karnataka",
+      "membership": "Regular"
+    },
+    {
+      "customer_id": "C005",
+      "name": "Vikram Reddy",
+      "city": "Hyderabad",
+      "state": "Telangana",
+      "membership": "Premium"
+    },
+    {
+      "customer_id": "C006",
+      "name": "Neha Kulkarni",
+      "city": "Mumbai",
+      "state": "Maharashtra",
+      "membership": "Regular"
+    }
+  ],
+  "orders": [
+    {
+      "order_id": "ORD1001",
+      "customer_id": "C001",
+      "store_id": "ST001",
+      "order_date": "2026-08-25",
+      "payment": "UPI",
+      "status": "Delivered",
+      "items": [
+        {
+          "product_id": "P001",
+          "quantity": 2,
+          "unit_price": 28
+        },
+        {
+          "product_id": "P009",
+          "quantity": 1,
+          "unit_price": 14999
+        }
+      ],
+      "total": 15055
+    },
+    {
+      "order_id": "ORD1002",
+      "customer_id": "C002",
+      "store_id": "ST002",
+      "order_date": "2026-08-26",
+      "payment": "Card",
+      "status": "Delivered",
+      "items": [
+        {
+          "product_id": "P002",
+          "quantity": 1,
+          "unit_price": 285
+        },
+        {
+          "product_id": "P004",
+          "quantity": 2,
+          "unit_price": 58
+        },
+        {
+          "product_id": "P006",
+          "quantity": 2,
+          "unit_price": 75
+        }
+      ],
+      "total": 551
+    },
+    {
+      "order_id": "ORD1003",
+      "customer_id": "C003",
+      "store_id": "ST002",
+      "order_date": "2026-08-28",
+      "payment": "UPI",
+      "status": "Delivered",
+      "items": [
+        {
+          "product_id": "P005",
+          "quantity": 1,
+          "unit_price": 420
+        },
+        {
+          "product_id": "P008",
+          "quantity": 1,
+          "unit_price": 390
+        }
+      ],
+      "total": 810
+    },
+    {
+      "order_id": "ORD1004",
+      "customer_id": "C004",
+      "store_id": "ST003",
+      "order_date": "2026-08-30",
+      "payment": "Card",
+      "status": "Processing",
+      "items": [
+        {
+          "product_id": "P010",
+          "quantity": 2,
+          "unit_price": 1499
+        },
+        {
+          "product_id": "P007",
+          "quantity": 1,
+          "unit_price": 125
+        }
+      ],
+      "total": 3123
+    },
+    {
+      "order_id": "ORD1005",
+      "customer_id": "C005",
+      "store_id": "ST004",
+      "order_date": "2026-09-01",
+      "payment": "UPI",
+      "status": "Delivered",
+      "items": [
+        {
+          "product_id": "P003",
+          "quantity": 3,
+          "unit_price": 145
+        },
+        {
+          "product_id": "P004",
+          "quantity": 2,
+          "unit_price": 58
+        }
+      ],
+      "total": 551
+    },
+    {
+      "order_id": "ORD1006",
+      "customer_id": "C006",
+      "store_id": "ST001",
+      "order_date": "2026-09-02",
+      "payment": "Cash",
+      "status": "Delivered",
+      "items": [
+        {
+          "product_id": "P006",
+          "quantity": 3,
+          "unit_price": 75
+        },
+        {
+          "product_id": "P001",
+          "quantity": 2,
+          "unit_price": 28
+        },
+        {
+          "product_id": "P007",
+          "quantity": 1,
+          "unit_price": 125
+        }
+      ],
+      "total": 406
+    }
+  ],
+  "inventory": [
+    {
+      "store_id": "ST001",
+      "product_id": "P001",
+      "quantity": 120,
+      "reorder_level": 30
+    },
+    {
+      "store_id": "ST001",
+      "product_id": "P009",
+      "quantity": 18,
+      "reorder_level": 5
+    },
+    {
+      "store_id": "ST002",
+      "product_id": "P002",
+      "quantity": 75,
+      "reorder_level": 20
+    },
+    {
+      "store_id": "ST002",
+      "product_id": "P004",
+      "quantity": 45,
+      "reorder_level": 15
+    },
+    {
+      "store_id": "ST002",
+      "product_id": "P005",
+      "quantity": 22,
+      "reorder_level": 10
+    },
+    {
+      "store_id": "ST003",
+      "product_id": "P010",
+      "quantity": 34,
+      "reorder_level": 8
+    },
+    {
+      "store_id": "ST003",
+      "product_id": "P007",
+      "quantity": 60,
+      "reorder_level": 15
+    },
+    {
+      "store_id": "ST004",
+      "product_id": "P003",
+      "quantity": 40,
+      "reorder_level": 12
+    }
+  ]
+}

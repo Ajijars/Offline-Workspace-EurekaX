@@ -6,7 +6,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, Play, Clock, Save, Download, Table2, AlertCircle, Bookmark, Database } from 'lucide-react';
+import { ArrowLeft, Play, Clock, Save, Download, Table2, AlertCircle, Bookmark, Database, Sparkles } from 'lucide-react';
 import AmbientBackground from '@/components/layout/AmbientBackground';
 import Sidebar from '@/components/layout/Sidebar';
 import AuthGuard from '@/components/auth/AuthGuard';
@@ -34,12 +34,59 @@ export default function SQLEditorPage() {
   const [saved, setSaved] = useState<SavedItem[]>([]);
   const [activeTab, setActiveTab] = useState<'results' | 'history' | 'saved'>('results');
   const [saveName, setSaveName] = useState('');
+  const [aiPrompt, setAiPrompt] = useState('');
+  const [generatingSql, setGeneratingSql] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Schema Explorer State
+  const [sources, setSources] = useState<any[]>([{ id: 'local', name: 'Local SQLite (Default)' }]);
+  const [selectedSource, setSelectedSource] = useState<string>('local');
+  const [schema, setSchema] = useState<any[]>([]);
+  const [loadingSchema, setLoadingSchema] = useState(false);
+  const [expandedTables, setExpandedTables] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     loadHistory();
     loadSaved();
+    loadSources();
   }, []);
+
+  useEffect(() => {
+    loadSchema(selectedSource);
+  }, [selectedSource]);
+
+  const loadSources = async () => {
+    try {
+      const res = await authFetch('/api/governance/sources');
+      const data = await res.json();
+      if (res.ok && Array.isArray(data)) {
+        // Filter out non-SQL sources for the SQL editor if needed, but we'll show them all
+        const sqlSources = data.filter((s: any) => s.source_type === 'sql' || s.source_type === 'csv');
+        setSources([{ id: 'local', name: 'Local SQLite (Default)' }, ...sqlSources]);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const loadSchema = async (sourceId: string) => {
+    setLoadingSchema(true);
+    setSchema([]);
+    try {
+      const res = await authFetch(`/api/query/schema?source_id=${sourceId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setSchema(data.schema || []);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+    setLoadingSchema(false);
+  };
+
+  const toggleTable = (tableName: string) => {
+    setExpandedTables(prev => ({ ...prev, [tableName]: !prev[tableName] }));
+  };
 
   const runQuery = async () => {
     if (!sql.trim()) return;
@@ -49,7 +96,7 @@ export default function SQLEditorPage() {
       const res = await authFetch('/api/query/sql', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sql, source_name: 'local' }),
+        body: JSON.stringify({ sql, source_name: selectedSource }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -64,20 +111,72 @@ export default function SQLEditorPage() {
     setRunning(false);
   };
 
+  const generateSql = async () => {
+    if (!aiPrompt.trim()) return;
+    setGeneratingSql(true);
+    try {
+      // Pass the schema context so Ollama knows the exact tables/columns
+      const res = await authFetch('http://localhost:8000/api/query/generate-sql', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question: aiPrompt, schema_context: schema }),
+      });
+      
+      if (!res.ok) {
+        const contentType = res.headers.get('content-type');
+        if (contentType && contentType.includes('application/json')) {
+          const data = await res.json();
+          alert(`API Error: ${data.detail || 'Failed to generate SQL'}`);
+        } else {
+          // If it's not JSON, it's likely a Next.js proxy timeout (504) or crash (500)
+          alert(`Timeout Error (${res.status}): The AI model took too long to respond. This usually happens on the first request while Ollama is loading the model into memory. Please wait a moment and try again!`);
+        }
+        setGeneratingSql(false);
+        return;
+      }
+
+      const data = await res.json();
+      if (data.sql) {
+        setSql(data.sql);
+      } else {
+        alert('Received empty response from the AI model.');
+      }
+    } catch (err) {
+      alert(`Network connection failed. Make sure your local server is running. (${err instanceof Error ? err.message : 'Unknown error'})`);
+    }
+    setGeneratingSql(false);
+  };
+
   const loadHistory = async () => {
     try {
       const res = await authFetch('/api/query/history');
       const data = await res.json();
-      setHistory(data);
-    } catch {}
+      if (Array.isArray(data)) {
+        setHistory(data);
+      } else if (data && Array.isArray(data.history)) {
+        setHistory(data.history);
+      } else {
+        setHistory([]);
+      }
+    } catch {
+      setHistory([]);
+    }
   };
 
   const loadSaved = async () => {
     try {
       const res = await authFetch('/api/query/saved');
       const data = await res.json();
-      setSaved(data);
-    } catch {}
+      if (Array.isArray(data)) {
+        setSaved(data);
+      } else if (data && Array.isArray(data.saved)) {
+        setSaved(data.saved);
+      } else {
+        setSaved([]);
+      }
+    } catch {
+      setSaved([]);
+    }
   };
 
   const saveQuery = async () => {
@@ -116,6 +215,83 @@ export default function SQLEditorPage() {
             <Link href="/" className="back-link"><ArrowLeft size={16} /> Back to Chat</Link>
             <h1 className="dashboard-title">SQL Editor</h1>
             <p className="dashboard-subtitle">Execute queries against local or connected data sources</p>
+
+            <div style={{ display: 'flex', gap: '20px', marginTop: '24px' }}>
+              
+              {/* Schema Explorer Sidebar */}
+              <div className="schema-sidebar" style={{ 
+                width: '280px', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: '16px',
+                background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: '12px', padding: '16px', maxHeight: 'calc(100vh - 180px)', overflowY: 'auto'
+              }}>
+                <h3 style={{ margin: 0, fontSize: '1rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Database size={16} /> Schema Explorer
+                </h3>
+                
+                <select 
+                  value={selectedSource} 
+                  onChange={e => setSelectedSource(e.target.value)}
+                  style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--bg-3)', color: 'var(--text-1)' }}
+                >
+                  {sources.map(s => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+
+                <div className="schema-tree" style={{ flex: 1 }}>
+                  {loadingSchema ? (
+                    <div style={{ color: 'var(--text-3)', fontSize: '0.85rem' }}>Loading schema...</div>
+                  ) : schema.length === 0 ? (
+                    <div style={{ color: 'var(--text-3)', fontSize: '0.85rem' }}>No tables found.</div>
+                  ) : (
+                    schema.map(table => (
+                      <div key={table.table_name} style={{ marginBottom: '8px' }}>
+                        <div 
+                          onClick={() => toggleTable(table.table_name)}
+                          style={{ 
+                            display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.9rem', 
+                            cursor: 'pointer', color: 'var(--text-1)', fontWeight: 500, padding: '4px 0'
+                          }}
+                        >
+                          <Table2 size={14} style={{ color: 'var(--primary)' }} /> 
+                          {table.table_name}
+                        </div>
+                        {expandedTables[table.table_name] && (
+                          <div style={{ paddingLeft: '20px', display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '4px' }}>
+                            {table.columns.map((col: any) => (
+                              <div key={col.name} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
+                                <span style={{ color: 'var(--text-2)' }}>{col.name}</span>
+                                <span style={{ color: 'var(--text-4)', fontSize: '0.75rem' }}>{col.type.toLowerCase()}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              {/* Main Editor Area */}
+              <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                {/* Ask AI */}
+                <div style={{ display: 'flex', gap: '8px' }}>
+              <input 
+                type="text" 
+                placeholder="Ask AI to generate a query (e.g., 'Show me all records from amazon')" 
+                value={aiPrompt} 
+                onChange={e => setAiPrompt(e.target.value)} 
+                onKeyDown={e => { if (e.key === 'Enter') generateSql(); }}
+                style={{ flex: 1, padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg-2)', color: 'var(--text-1)' }}
+              />
+              <button 
+                className="sql-run-btn" 
+                onClick={generateSql} 
+                disabled={generatingSql || !aiPrompt.trim()}
+                style={{ background: 'var(--primary)', padding: '0 16px' }}
+              >
+                {generatingSql ? <div className="login-btn-spinner" /> : <><Sparkles size={14} /> Generate SQL</>}
+              </button>
+            </div>
 
             {/* Editor */}
             <div className="sql-editor-wrap">
@@ -221,6 +397,8 @@ export default function SQLEditorPage() {
                 {saved.length === 0 && <p style={{ color: 'var(--text-3)', fontSize: '0.82rem', padding: 16 }}>No saved queries</p>}
               </div>
             )}
+              </div>
+            </div>
           </div>
         </main>
       </div>

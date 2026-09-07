@@ -183,5 +183,40 @@ class SQLService:
             for s in result.scalars().all()
         ]
 
+    async def get_schema(
+        self, db: AsyncSession, connection_string: Optional[str] = None
+    ) -> list[dict]:
+        from sqlalchemy import inspect
+        
+        def sync_get_schema(conn):
+            insp = inspect(conn)
+            tables = insp.get_table_names()
+            result = []
+            for t in tables:
+                # Skip internal tables
+                if t in ("alembic_version", "query_history", "saved_queries", "users", "permissions", "data_sources", "catalog_entries", "audit_logs", "alerts"):
+                    continue
+                cols = insp.get_columns(t)
+                result.append({
+                    "table_name": t,
+                    "columns": [{"name": c["name"], "type": str(c["type"])} for c in cols]
+                })
+            return result
+
+        try:
+            if connection_string:
+                engine = create_async_engine(connection_string, echo=False)
+                async with engine.connect() as conn:
+                    schema = await conn.run_sync(sync_get_schema)
+                await engine.dispose()
+                return schema
+            else:
+                conn = await db.connection()
+                schema = await conn.run_sync(sync_get_schema)
+                return schema
+        except Exception as e:
+            logger.error(f"[SQL] Schema introspection failed: {e}")
+            return []
+
 
 sql_service = SQLService()

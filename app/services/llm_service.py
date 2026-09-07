@@ -26,7 +26,7 @@ class OllamaService:
         self.default_model = settings.OLLAMA_MODEL
         self.timeout = httpx.Timeout(
             connect=10.0,     # 10s to establish connection
-            read=120.0,       # 120s to wait for response (LLM can be slow)
+            read=300.0,       # 300s to wait for response (first request loads model into memory)
             write=10.0,
             pool=10.0
         )

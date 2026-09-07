@@ -302,6 +302,11 @@ a:hover { color: var(--text-1); }
   appearance: auto;
 }
 
+select option {
+  background: var(--bg-surface);
+  color: var(--text-1);
+}
+
 .styled-select:focus { border-color: var(--primary); }
 
 /* Temperature */

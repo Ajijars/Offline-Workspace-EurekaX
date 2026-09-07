@@ -41,6 +41,11 @@ class SaveQueryRequest(BaseModel):
     source_name: str = ""
     description: str = ""
 
+class NL2SQLRequest(BaseModel):
+    question: str = Field(..., min_length=1)
+    dataset_name: Optional[str] = None
+    schema_context: Optional[list] = None  # Frontend can pass explicit schema
+
 
 # ── SQL ──
 
@@ -86,8 +91,79 @@ async def execute_sql(
                     raise HTTPException(status_code=403, detail=msg)
 
     from app.services.sql_service import sql_service
-    result = await sql_service.execute(db, sql=body.sql, source_name=body.source_name, user_id=user.id, max_rows=body.max_rows)
+    from app.services.catalog_service import DataSource
+    import json
+    
+    connection_string = None
+    is_csv = False
+    
+    if body.source_name and body.source_name != "local" and body.source_name != "databricks":
+        source = (await db.execute(select(DataSource).where(DataSource.id == body.source_name))).scalar_one_or_none()
+        if source:
+            if source.source_type == "csv":
+                is_csv = True
+            else:
+                try:
+                    config = json.loads(source.connection_config) if source.connection_config else {}
+                    connection_string = config.get("connection_string")
+                except:
+                    pass
 
+    if is_csv:
+        import pandas as pd
+        import sqlite3
+        import time
+        from pathlib import Path
+        start = time.monotonic()
+        try:
+            entries = await catalog_service.list_entries(db, source_id=body.source_name)
+            conn = sqlite3.connect(":memory:")
+            for entry in entries:
+                file_path = Path("C:/SIH_Project/secure_storage/dataset") / entry["table_name"]
+                if file_path.exists():
+                    df = pd.read_csv(file_path)
+                    table_name = entry["table_name"].rsplit(".", 1)[0]
+                    df.to_sql(table_name, conn, index=False, if_exists="replace")
+                    df.to_sql(entry["table_name"], conn, index=False, if_exists="replace")
+            
+            cursor = conn.cursor()
+            cursor.execute(body.sql)
+            if cursor.description:
+                columns = [desc[0] for desc in cursor.description]
+                rows = [dict(zip(columns, row)) for row in cursor.fetchmany(body.max_rows)]
+                row_count = len(rows)
+            else:
+                columns = []
+                rows = []
+                row_count = cursor.rowcount
+            conn.close()
+            elapsed_ms = int((time.monotonic() - start) * 1000)
+            result = {
+                "success": True,
+                "columns": columns,
+                "rows": rows,
+                "row_count": row_count,
+                "duration_ms": elapsed_ms,
+                "truncated": row_count >= body.max_rows,
+            }
+        except Exception as e:
+            elapsed_ms = int((time.monotonic() - start) * 1000) if 'start' in locals() else 0
+            result = {
+                "success": False,
+                "error": str(e),
+                "columns": [],
+                "rows": [],
+                "duration_ms": elapsed_ms,
+            }
+        
+        await sql_service._save_history(
+            db, user_id=user.id, source_name=body.source_name,
+            query_text=body.sql, status="success" if result.get("success") else "error",
+            row_count=result.get("row_count", 0), duration_ms=elapsed_ms,
+            error_message=result.get("error", None)
+        )
+    else:
+        result = await sql_service.execute(db, sql=body.sql, source_name=body.source_name, user_id=user.id, max_rows=body.max_rows, connection_string=connection_string)
     await audit_service.log(db, user_id=user.id, action="sql_query", resource_type="sql", details={"source": body.source_name, "rows": result.get("row_count", 0)})
 
     # PII Scanning on Output
@@ -116,6 +192,96 @@ async def execute_sql(
         await anomaly_detector.create_alert(db, user_id=user.id, alert_type="bulk_extract", severity="medium", message=bulk_msg)
 
     return result
+
+
+@query_router.post("/generate-sql")
+async def generate_sql(
+    body: NL2SQLRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Generate SQL from natural language using Ollama."""
+    from app.services.llm_service import ollama_service
+    import re
+    
+    # Try to fetch schema to give context to the LLM
+    schema_context = ""
+    
+    # If the frontend passes explicit schema context (e.g., selected from Schema Explorer)
+    if body.schema_context:
+        for table in body.schema_context:
+            schema_context += f"Table: {table.get('table_name')}\\n"
+            columns = table.get("columns", [])
+            schema_context += f"Columns: {', '.join([c.get('name', '') + ' (' + c.get('type', '') + ')' for c in columns])}\\n\\n"
+    else:
+        # Fallback: scan catalog entries
+        all_entries = await catalog_service.list_entries(db)
+        for entry in all_entries:
+            if body.dataset_name and body.dataset_name.lower() in entry["table_name"].lower():
+                schema_context += f"Table: {entry['table_name']}\\n"
+                if entry.get("schema"):
+                    schema_context += f"Columns: {', '.join([c.get('name', '') for c in entry['schema']])}\\n"
+                schema_context += "\\n"
+            elif not body.dataset_name: # if no specific dataset, provide all (truncated if too many)
+                schema_context += f"Table: {entry['table_name']}\\n"
+
+    prompt = (
+        "You are an expert SQL generator. Convert the following natural language request into a valid SQL query.\\n"
+        "Output ONLY the SQL query, nothing else, no markdown formatting (do not wrap in ```sql). \\n"
+    )
+    if schema_context:
+        prompt += f"Here are the available tables and columns for context:\\n{schema_context[:3000]}\\n"
+        
+    prompt += f"Request: {body.question}"
+    
+    try:
+        res = await ollama_service.generate(prompt=prompt, temperature=0.0)
+        sql = res["response"].strip()
+        # Clean markdown if the LLM didn't listen
+        sql = re.sub(r'^```sql\\s*|```\\s*$', '', sql, flags=re.IGNORECASE | re.MULTILINE).strip()
+        return {"sql": sql}
+    except Exception as e:
+        logger.error(f"Failed to generate SQL: {e}")
+        raise HTTPException(status_code=500, detail="Failed to generate SQL query from the prompt.")
+
+
+# ── Database Schema Introspection ──
+
+@query_router.get("/schema")
+async def get_sql_schema(
+    source_id: Optional[str] = None,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get the SQL schema (tables and columns) for local SQLite, external SQL, or catalog CSVs."""
+    from app.services.sql_service import sql_service
+    from app.services.catalog_service import DataSource
+    connection_string = None
+    
+    if source_id and source_id != "local":
+        # Fetch the DataSource directly to get the hidden connection_config
+        source = (await db.execute(select(DataSource).where(DataSource.id == source_id))).scalar_one_or_none()
+        if not source:
+            raise HTTPException(status_code=404, detail="Data source not found")
+            
+        try:
+            config = json.loads(source.connection_config) if source.connection_config else {}
+            connection_string = config.get("connection_string")
+        except:
+            pass
+            
+        # If there's no connection string (e.g. it's a CSV source or incomplete config),
+        # don't fallback to the local SQLite DB! Instead, fetch from catalog_entries.
+        if not connection_string:
+            entries = await catalog_service.list_entries(db, source_id=source_id)
+            schema = []
+            for entry in entries:
+                cols = [{"name": c["name"], "type": c.get("type", "TEXT")} for c in entry.get("schema", [])]
+                schema.append({"table_name": entry["table_name"], "columns": cols})
+            return {"schema": schema}
+
+    schema = await sql_service.get_schema(db, connection_string)
+    return {"schema": schema}
 
 
 # ── MongoDB ──
