@@ -21,7 +21,7 @@ Offline assistant with three layers: local chat, document RAG, and a LangGraph m
 
 ```powershell
 ollama pull qwen3:8b
-ollama serve
+ollama serve    
 ```
 
 Ollama listens on `http://localhost:11434`.

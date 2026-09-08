@@ -77,6 +77,22 @@ class PipelineService:
         p = result.scalar_one_or_none()
         return self._pipeline_to_dict(p) if p else None
 
+    async def update(
+        self, db: AsyncSession, pipeline_id: str, *, name: str, steps: list[dict],
+        description: str = "",
+    ) -> Optional[dict]:
+        result = await db.execute(select(Pipeline).where(Pipeline.id == pipeline_id))
+        p = result.scalar_one_or_none()
+        if not p:
+            return None
+        p.name = name
+        p.description = description
+        p.steps_json = json.dumps(steps)
+        p.updated_at = datetime.now(timezone.utc)
+        await db.commit()
+        await db.refresh(p)
+        return self._pipeline_to_dict(p)
+
     async def delete(self, db: AsyncSession, pipeline_id: str) -> bool:
         result = await db.execute(select(Pipeline).where(Pipeline.id == pipeline_id))
         p = result.scalar_one_or_none()
@@ -154,7 +170,8 @@ class PipelineService:
         elif step_type == "python":
             from app.agents.tools import execute_python
             result = await execute_python(step.get("code", ""))
-            return {"success": result.get("success", False), "type": "python", "output": result.get("stdout", "")[:1000], "error": result.get("stderr")}
+            logger.error(f"[execute_python raw result]: {result}")
+            return {"success": result.get("success", False), "type": "python", "output": result.get("stdout", "")[:1000], "error": result.get("stderr") or result.get("error") or str(result)}
 
         elif step_type == "notify":
             logger.info("[Pipeline] Notify: %s", step.get("message", "Step complete"))

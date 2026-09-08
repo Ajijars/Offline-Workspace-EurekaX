@@ -7,6 +7,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter, usePathname } from 'next/navigation';
 import {
   Layers,
   Plus,
@@ -35,6 +36,15 @@ import AgentFileUpload from '@/components/agent/AgentFileUpload';
 export default function Sidebar() {
   const mode = useAppStore((s) => s.mode);
   const setMode = useAppStore((s) => s.setMode);
+  const router = useRouter();
+  const pathname = usePathname();
+
+  const handleModeChange = (newMode: 'chat' | 'rag' | 'agent') => {
+    setMode(newMode);
+    if (pathname !== '/') {
+      router.push('/');
+    }
+  };
   const currentModel = useAppStore((s) => s.currentModel);
   const setCurrentModel = useAppStore((s) => s.setCurrentModel);
   const temperature = useAppStore((s) => s.temperature);
@@ -106,15 +116,17 @@ export default function Sidebar() {
     <aside className={sidebarClass}>
       {/* ── Logo ── */}
       <div className="sidebar-header">
-        <div className="logo">
-          <div className="logo-icon">
-            <Layers size={18} />
+        <Link href={user?.role === 'admin' ? '/admin-home' : '/employee-home'} style={{ textDecoration: 'none', display: 'flex', alignItems: 'center' }}>
+          <div className="logo">
+            <div className="logo-icon">
+              <Layers size={18} />
+            </div>
+            <div className="logo-text-group">
+              <span className="logo-title">EurekaX</span>
+              <span className="logo-sub">Data Platform v4.0</span>
+            </div>
           </div>
-          <div className="logo-text-group">
-            <span className="logo-title">EurekaX</span>
-            <span className="logo-sub">Data Platform v4.0</span>
-          </div>
-        </div>
+        </Link>
         <button className="icon-btn icon-btn-sm" onClick={clearMessages} title="New Chat">
           <Plus size={15} />
         </button>
@@ -128,21 +140,21 @@ export default function Sidebar() {
           <div className="mode-pills">
             <button
               className={`mode-pill ${mode === 'chat' ? 'active-chat' : ''}`}
-              onClick={() => setMode('chat')}
+              onClick={() => handleModeChange('chat')}
             >
               <MessageSquare size={13} />
               <span>Chat</span>
             </button>
             <button
               className={`mode-pill ${mode === 'rag' ? 'active-rag' : ''}`}
-              onClick={() => setMode('rag')}
+              onClick={() => handleModeChange('rag')}
             >
               <FileText size={13} />
               <span>RAG</span>
             </button>
             <button
               className={`mode-pill ${mode === 'agent' ? 'active-agent' : ''}`}
-              onClick={() => setMode('agent')}
+              onClick={() => handleModeChange('agent')}
             >
               <Settings size={13} />
               <span>Agent</span>

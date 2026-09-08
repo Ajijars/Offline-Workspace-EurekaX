@@ -41,14 +41,14 @@ async def _require_pipe_access(p: dict, user: User):
 
 # ── Pipelines ──
 
-@pipeline_router.get("/")
+@pipeline_router.get("")
 async def list_pipelines(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     all_p = await pipeline_service.list_all(db)
     if user.role != "admin":
         return [p for p in all_p if p.get("created_by") == user.id]
     return all_p
 
-@pipeline_router.post("/", status_code=201)
+@pipeline_router.post("", status_code=201)
 async def create_pipeline(body: CreatePipelineRequest, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     return await pipeline_service.create(db, name=body.name, steps=body.steps, description=body.description, created_by=user.id)
 
@@ -57,6 +57,15 @@ async def get_pipeline(pipeline_id: str, user: User = Depends(get_current_user),
     p = await pipeline_service.get(db, pipeline_id)
     await _require_pipe_access(p, user)
     return p
+
+@pipeline_router.put("/{pipeline_id}")
+async def update_pipeline(pipeline_id: str, body: CreatePipelineRequest, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    p = await pipeline_service.get(db, pipeline_id)
+    await _require_pipe_access(p, user)
+    updated = await pipeline_service.update(db, pipeline_id, name=body.name, steps=body.steps, description=body.description)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Pipeline not found")
+    return updated
 
 @pipeline_router.delete("/{pipeline_id}")
 async def delete_pipeline(pipeline_id: str, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):

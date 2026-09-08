@@ -6,7 +6,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, Plus, Play, Trash2, Clock, CheckCircle, XCircle, GitBranch, Calendar } from 'lucide-react';
+import { ArrowLeft, Plus, Play, Trash2, Clock, CheckCircle, XCircle, GitBranch, Calendar, Edit2 } from 'lucide-react';
 import AmbientBackground from '@/components/layout/AmbientBackground';
 import AuthGuard from '@/components/auth/AuthGuard';
 import { authFetch } from '@/lib/auth';
@@ -22,38 +22,73 @@ export default function PipelinesPage() {
   const [runs, setRuns] = useState<RunItem[]>([]);
   const [selectedPipeline, setSelectedPipeline] = useState<PipelineItem | null>(null);
   const [showCreate, setShowCreate] = useState(false);
-  const [newPipeline, setNewPipeline] = useState({ name: '', description: '', steps: [{ type: 'query', sql: '' }] as PipelineStep[] });
+  const [sources, setSources] = useState<any[]>([{ id: 'local', name: 'Local SQLite (Default)' }]);
+  const [newPipeline, setNewPipeline] = useState({ name: '', description: '', steps: [{ type: 'query', sql: '', source: 'local' }] as PipelineStep[] });
   const [showSchedule, setShowSchedule] = useState(false);
   const [newSchedule, setNewSchedule] = useState({ name: '', cron_expression: '0 * * * *' });
+  const [runningPipelineId, setRunningPipelineId] = useState<string | null>(null);
+  const [editingPipelineId, setEditingPipelineId] = useState<string | null>(null);
 
   useEffect(() => { loadAll(); }, []);
 
   const loadAll = async () => {
     try {
-      const [pRes, sRes] = await Promise.all([
-        authFetch('/api/pipelines/').then(r => r.json()),
+      const [pRes, sRes, srcResRaw] = await Promise.all([
+        authFetch('/api/pipelines').then(r => r.json()),
         authFetch('/api/pipelines/schedules/all').then(r => r.json()),
+        authFetch('/api/governance/sources')
       ]);
       setPipelines(Array.isArray(pRes) ? pRes : []);
       setSchedules(Array.isArray(sRes) ? sRes : []);
+      
+      if (srcResRaw.ok) {
+        const srcRes = await srcResRaw.json();
+        if (Array.isArray(srcRes)) {
+          const sqlSources = srcRes.filter((s: any) => s.source_type === 'sql' || s.source_type === 'csv');
+          setSources([{ id: 'local', name: 'Local SQLite (Default)' }, ...sqlSources]);
+        }
+      }
     } catch {}
   };
 
-  const createPipeline = async () => {
+  const savePipeline = async () => {
     if (!newPipeline.name.trim()) return;
-    await authFetch('/api/pipelines/', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(newPipeline),
-    });
+    if (editingPipelineId) {
+      await authFetch(`/api/pipelines/${editingPipelineId}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newPipeline),
+      });
+    } else {
+      await authFetch('/api/pipelines', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newPipeline),
+      });
+    }
     setShowCreate(false);
-    setNewPipeline({ name: '', description: '', steps: [{ type: 'query', sql: '' }] });
+    setEditingPipelineId(null);
+    setNewPipeline({ name: '', description: '', steps: [{ type: 'query', sql: '', source: 'local' }] });
     loadAll();
   };
 
+  const startEditPipeline = (p: PipelineItem) => {
+    setNewPipeline({ name: p.name, description: p.description, steps: p.steps });
+    setEditingPipelineId(p.id);
+    setShowCreate(true);
+  };
+
   const runPipeline = async (id: string) => {
-    const res = await authFetch(`/api/pipelines/${id}/run`, { method: 'POST' });
-    await loadRuns(id);
-    loadAll();
+    setRunningPipelineId(id);
+    const p = pipelines.find(x => x.id === id);
+    if (p && selectedPipeline?.id !== id) {
+      setSelectedPipeline(p);
+    }
+    try {
+      await authFetch(`/api/pipelines/${id}/run`, { method: 'POST' });
+      await loadRuns(id);
+      await loadAll();
+    } finally {
+      setRunningPipelineId(null);
+    }
   };
 
   const loadRuns = async (id: string) => {
@@ -86,7 +121,7 @@ export default function PipelinesPage() {
   };
 
   const addStep = () => {
-    setNewPipeline(p => ({ ...p, steps: [...p.steps, { type: 'query', sql: '' }] }));
+    setNewPipeline(p => ({ ...p, steps: [...p.steps, { type: 'query', sql: '', source: 'local' }] }));
   };
 
   const updateStep = (idx: number, field: string, value: string) => {
@@ -106,7 +141,13 @@ export default function PipelinesPage() {
             <p className="dashboard-subtitle">Build, run, and schedule ETL pipelines</p>
 
             <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-              <button className="sql-run-btn" onClick={() => setShowCreate(!showCreate)}><Plus size={14} /> New Pipeline</button>
+              <button className="sql-run-btn" onClick={() => {
+                setShowCreate(!showCreate);
+                if (!showCreate) {
+                  setEditingPipelineId(null);
+                  setNewPipeline({ name: '', description: '', steps: [{ type: 'query', sql: '', source: 'local' }] });
+                }
+              }}><Plus size={14} /> New Pipeline</button>
             </div>
 
             {/* Create Form */}
@@ -123,6 +164,13 @@ export default function PipelinesPage() {
                       <option value="python">Python</option>
                       <option value="notify">Notify</option>
                     </select>
+                    {step.type === 'query' && (
+                      <select value={step.source || 'local'} onChange={e => updateStep(i, 'source', e.target.value)} className="styled-select" style={{ width: 180 }}>
+                        {sources.map(s => (
+                          <option key={s.id} value={s.id}>{s.name}</option>
+                        ))}
+                      </select>
+                    )}
                     {step.type === 'query' && <input placeholder="SQL query..." value={step.sql || ''} onChange={e => updateStep(i, 'sql', e.target.value)} className="sql-save-input" style={{ flex: 1 }} />}
                     {step.type === 'python' && <input placeholder="Python code..." value={step.code || ''} onChange={e => updateStep(i, 'code', e.target.value)} className="sql-save-input" style={{ flex: 1 }} />}
                     {step.type === 'notify' && <input placeholder="Message..." value={step.message || ''} onChange={e => updateStep(i, 'message', e.target.value)} className="sql-save-input" style={{ flex: 1 }} />}
@@ -130,7 +178,8 @@ export default function PipelinesPage() {
                 ))}
                 <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
                   <button className="governance-add-btn" onClick={addStep}><Plus size={14} /> Add Step</button>
-                  <button className="sql-run-btn" onClick={createPipeline}>Create Pipeline</button>
+                  <button className="sql-run-btn" onClick={savePipeline}>{editingPipelineId ? 'Update Pipeline' : 'Create Pipeline'}</button>
+                  <button className="governance-add-btn" onClick={() => { setShowCreate(false); setEditingPipelineId(null); setNewPipeline({ name: '', description: '', steps: [{ type: 'query', sql: '', source: 'local' }] }); }}>Cancel</button>
                 </div>
               </div>
             )}
@@ -147,7 +196,10 @@ export default function PipelinesPage() {
                         <div className="nb-list-name">{p.name}</div>
                         <div className="nb-list-meta">{p.steps.length} steps · {new Date(p.created_at).toLocaleDateString()}</div>
                       </div>
-                      <button className="icon-btn icon-btn-sm" onClick={e => { e.stopPropagation(); runPipeline(p.id); }} title="Run"><Play size={14} /></button>
+                      <button className="icon-btn icon-btn-sm" disabled={runningPipelineId === p.id} onClick={e => { e.stopPropagation(); runPipeline(p.id); }} title="Run">
+                        {runningPipelineId === p.id ? <Clock size={14} className="spin" /> : <Play size={14} />}
+                      </button>
+                      <button className="icon-btn icon-btn-sm" onClick={e => { e.stopPropagation(); startEditPipeline(p); }} title="Edit"><Edit2 size={14} /></button>
                       <button className="icon-btn icon-btn-sm" onClick={e => { e.stopPropagation(); deletePipeline(p.id); }} title="Delete"><Trash2 size={14} /></button>
                     </div>
                   ))}

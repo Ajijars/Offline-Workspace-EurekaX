@@ -5,8 +5,9 @@
  */
 
 import { useState, useEffect, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Play, Clock, Save, Download, Table2, AlertCircle, Bookmark, Database, Sparkles } from 'lucide-react';
+import { ArrowLeft, Play, Clock, Save, Download, Table2, AlertCircle, Bookmark, Database, Sparkles, GitBranch } from 'lucide-react';
 import AmbientBackground from '@/components/layout/AmbientBackground';
 import Sidebar from '@/components/layout/Sidebar';
 import AuthGuard from '@/components/auth/AuthGuard';
@@ -37,6 +38,7 @@ export default function SQLEditorPage() {
   const [aiPrompt, setAiPrompt] = useState('');
   const [generatingSql, setGeneratingSql] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const router = useRouter();
 
   // Schema Explorer State
   const [sources, setSources] = useState<any[]>([{ id: 'local', name: 'Local SQLite (Default)' }]);
@@ -190,6 +192,29 @@ export default function SQLEditorPage() {
     loadSaved();
   };
 
+  const createPipelineFromQuery = async () => {
+    if (!sql.trim()) return;
+    const pipeName = saveName.trim() ? saveName : 'New SQL Pipeline';
+    try {
+      const res = await authFetch('/api/pipelines', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          name: pipeName, 
+          description: 'Created from SQL Editor', 
+          steps: [{ type: 'query', sql: sql, source: selectedSource }] 
+        }),
+      });
+      if (res.ok) {
+        router.push('/pipelines');
+      } else {
+        alert('Failed to create pipeline.');
+      }
+    } catch (e) {
+      alert(`Network error: ${e instanceof Error ? e.message : 'Unknown error'}`);
+    }
+  };
+
   const exportCSV = () => {
     if (!result?.columns.length) return;
     const header = result.columns.join(',') + '\n';
@@ -313,6 +338,9 @@ export default function SQLEditorPage() {
                   <input placeholder="Query name..." value={saveName} onChange={e => setSaveName(e.target.value)} className="sql-save-input" />
                   <button className="governance-add-btn" onClick={saveQuery} disabled={!saveName.trim()}>
                     <Save size={14} /> Save Query
+                  </button>
+                  <button className="governance-add-btn" onClick={createPipelineFromQuery} disabled={!sql.trim()} title="Create Pipeline from Query">
+                    <GitBranch size={14} /> Create Pipeline
                   </button>
                 </div>
               </div>

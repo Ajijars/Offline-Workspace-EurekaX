@@ -91,79 +91,11 @@ async def execute_sql(
                     raise HTTPException(status_code=403, detail=msg)
 
     from app.services.sql_service import sql_service
-    from app.services.catalog_service import DataSource
-    import json
     
-    connection_string = None
-    is_csv = False
+    result = await sql_service.execute(
+        db, sql=body.sql, source_name=body.source_name, user_id=user.id, max_rows=body.max_rows
+    )
     
-    if body.source_name and body.source_name != "local" and body.source_name != "databricks":
-        source = (await db.execute(select(DataSource).where(DataSource.id == body.source_name))).scalar_one_or_none()
-        if source:
-            if source.source_type == "csv":
-                is_csv = True
-            else:
-                try:
-                    config = json.loads(source.connection_config) if source.connection_config else {}
-                    connection_string = config.get("connection_string")
-                except:
-                    pass
-
-    if is_csv:
-        import pandas as pd
-        import sqlite3
-        import time
-        from pathlib import Path
-        start = time.monotonic()
-        try:
-            entries = await catalog_service.list_entries(db, source_id=body.source_name)
-            conn = sqlite3.connect(":memory:")
-            for entry in entries:
-                file_path = Path("C:/SIH_Project/secure_storage/dataset") / entry["table_name"]
-                if file_path.exists():
-                    df = pd.read_csv(file_path)
-                    table_name = entry["table_name"].rsplit(".", 1)[0]
-                    df.to_sql(table_name, conn, index=False, if_exists="replace")
-                    df.to_sql(entry["table_name"], conn, index=False, if_exists="replace")
-            
-            cursor = conn.cursor()
-            cursor.execute(body.sql)
-            if cursor.description:
-                columns = [desc[0] for desc in cursor.description]
-                rows = [dict(zip(columns, row)) for row in cursor.fetchmany(body.max_rows)]
-                row_count = len(rows)
-            else:
-                columns = []
-                rows = []
-                row_count = cursor.rowcount
-            conn.close()
-            elapsed_ms = int((time.monotonic() - start) * 1000)
-            result = {
-                "success": True,
-                "columns": columns,
-                "rows": rows,
-                "row_count": row_count,
-                "duration_ms": elapsed_ms,
-                "truncated": row_count >= body.max_rows,
-            }
-        except Exception as e:
-            elapsed_ms = int((time.monotonic() - start) * 1000) if 'start' in locals() else 0
-            result = {
-                "success": False,
-                "error": str(e),
-                "columns": [],
-                "rows": [],
-                "duration_ms": elapsed_ms,
-            }
-        
-        await sql_service._save_history(
-            db, user_id=user.id, source_name=body.source_name,
-            query_text=body.sql, status="success" if result.get("success") else "error",
-            row_count=result.get("row_count", 0), duration_ms=elapsed_ms,
-            error_message=result.get("error", None)
-        )
-    else:
-        result = await sql_service.execute(db, sql=body.sql, source_name=body.source_name, user_id=user.id, max_rows=body.max_rows, connection_string=connection_string)
     await audit_service.log(db, user_id=user.id, action="sql_query", resource_type="sql", details={"source": body.source_name, "rows": result.get("row_count", 0)})
 
     # PII Scanning on Output

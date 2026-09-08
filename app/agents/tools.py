@@ -258,15 +258,13 @@ async def execute_python(code: str, timeout: int = 30, sandbox_dir: str = "sandb
 
     start = time.monotonic()
 
+    import subprocess
     # ── Try Docker first ──────────────────────────────────────────────────
     docker_available = False
     try:
-        check = await asyncio.create_subprocess_exec(
-            "docker", "info",
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        await asyncio.wait_for(check.wait(), timeout=3)
+        def check_docker():
+            return subprocess.run(["docker", "info"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
+        check = await asyncio.to_thread(check_docker)
         docker_available = (check.returncode == 0)
     except Exception:
         pass
@@ -276,34 +274,29 @@ async def execute_python(code: str, timeout: int = 30, sandbox_dir: str = "sandb
         try:
             docker_cmd = [
                 "docker", "run", "--rm",
-                "--network", "none",          # No internet
-                "--memory", "256m",           # Memory limit
-                "--cpus", "0.5",              # CPU limit
-                "--read-only",                # Read-only root fs
-                "--tmpfs", "/tmp:size=64m",  # Writable /tmp only
-                "-v", f"{abs_sandbox}:/sandbox:ro",  # Mount sandbox read-only
+                "--network", "none",
+                "--memory", "256m",
+                "--cpus", "0.5",
+                "--read-only",
+                "--tmpfs", "/tmp:size=64m",
+                "-v", f"{abs_sandbox}:/sandbox:ro",
                 "--workdir", "/tmp",
                 "python:3.11-slim",
-                "python", f"/sandbox/_agent_exec.py",
+                "python", "/sandbox/_agent_exec.py",
             ]
-            proc = await asyncio.create_subprocess_exec(
-                *docker_cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout_b, stderr_b = await asyncio.wait_for(
-                proc.communicate(), timeout=timeout
-            )
+            def run_docker():
+                return subprocess.run(docker_cmd, capture_output=True, timeout=timeout)
+            proc = await asyncio.to_thread(run_docker)
             elapsed_ms = round((time.monotonic() - start) * 1000, 2)
             return {
                 "success": proc.returncode == 0,
-                "stdout": stdout_b.decode("utf-8", errors="replace")[:5000],
-                "stderr": stderr_b.decode("utf-8", errors="replace")[:2000],
+                "stdout": proc.stdout.decode("utf-8", errors="replace")[:5000],
+                "stderr": proc.stderr.decode("utf-8", errors="replace")[:2000],
                 "exit_code": proc.returncode,
                 "execution_time_ms": elapsed_ms,
                 "sandbox": "docker",
             }
-        except asyncio.TimeoutError:
+        except subprocess.TimeoutExpired:
             return {
                 "success": False,
                 "error": f"Docker execution timed out after {timeout}s",
@@ -317,25 +310,24 @@ async def execute_python(code: str, timeout: int = 30, sandbox_dir: str = "sandb
     # ── Fallback: local subprocess ─────────────────────────────────────────
     logger.info("[execute_python] Using local subprocess sandbox (Docker unavailable)")
     try:
-        proc = await asyncio.create_subprocess_exec(
-            sys.executable, str(script_file),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=str(sandbox),
-        )
-        stdout_b, stderr_b = await asyncio.wait_for(
-            proc.communicate(), timeout=timeout
-        )
+        def run_local():
+            return subprocess.run(
+                [sys.executable, str(script_file.resolve())],
+                capture_output=True,
+                timeout=timeout,
+                cwd=str(sandbox)
+            )
+        proc = await asyncio.to_thread(run_local)
         elapsed_ms = round((time.monotonic() - start) * 1000, 2)
         return {
             "success": proc.returncode == 0,
-            "stdout": stdout_b.decode("utf-8", errors="replace")[:5000],
-            "stderr": stderr_b.decode("utf-8", errors="replace")[:2000],
+            "stdout": proc.stdout.decode("utf-8", errors="replace")[:5000],
+            "stderr": proc.stderr.decode("utf-8", errors="replace")[:2000],
             "exit_code": proc.returncode,
             "execution_time_ms": elapsed_ms,
             "sandbox": "subprocess",
         }
-    except asyncio.TimeoutError:
+    except subprocess.TimeoutExpired:
         return {
             "success": False,
             "error": f"Execution timed out after {timeout}s",
@@ -344,8 +336,10 @@ async def execute_python(code: str, timeout: int = 30, sandbox_dir: str = "sandb
             "sandbox": "subprocess",
         }
     except Exception as e:
-        logger.error(f"[execute_python] Error: {e}")
-        return {"success": False, "error": str(e)}
+        import traceback
+        tb = traceback.format_exc()
+        logger.error(f"[execute_python] Error: {e}\n{tb}")
+        return {"success": False, "error": f"{type(e).__name__}: {str(e)} - {tb}"}
 
 
 # ──────────────────────────────────────────────

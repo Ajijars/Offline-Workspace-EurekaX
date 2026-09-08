@@ -172,7 +172,7 @@ Supports: **PDF, DOCX, PPTX, TXT, CSV**
 - PDF → PyPDF2 (text layers) + OCR fallback (PaddleOCR / Tesseract)
 - DOCX → python-docx
 - PPTX → python-pptx (slide text extraction)
-- Images → PaddleOCR or pytesseract
+- Images → PaddleOCR or pytesseractx`
 
 #### 4b. Text Chunking (LangChain)
 Uses `RecursiveCharacterTextSplitter`:

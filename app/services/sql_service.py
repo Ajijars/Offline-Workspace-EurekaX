@@ -62,7 +62,50 @@ class SQLService:
             if source_name == "databricks":
                 return await self._execute_databricks(sql, max_rows)
 
-            if connection_string:
+            is_csv = False
+            if not connection_string and source_name not in ("local", "databricks"):
+                from app.services.catalog_service import DataSource
+                import json
+                source = (await db.execute(select(DataSource).where(DataSource.id == source_name))).scalar_one_or_none()
+                if source:
+                    if source.source_type == "csv":
+                        is_csv = True
+                    else:
+                        try:
+                            config = json.loads(source.connection_config) if source.connection_config else {}
+                            connection_string = config.get("connection_string")
+                        except:
+                            pass
+
+            if is_csv:
+                import pandas as pd
+                import sqlite3
+                from pathlib import Path
+                from app.services.catalog_service import catalog_service
+                
+                entries = await catalog_service.list_entries(db, source_id=source_name)
+                conn = sqlite3.connect(":memory:")
+                for entry in entries:
+                    file_path = Path("C:/SIH_Project/secure_storage/dataset") / entry["table_name"]
+                    if file_path.exists():
+                        df = pd.read_csv(file_path)
+                        table_name = entry["table_name"].rsplit(".", 1)[0]
+                        df.to_sql(table_name, conn, index=False, if_exists="replace")
+                        df.to_sql(entry["table_name"], conn, index=False, if_exists="replace")
+                
+                cursor = conn.cursor()
+                cursor.execute(sql)
+                if cursor.description:
+                    columns = [desc[0] for desc in cursor.description]
+                    rows = [dict(zip(columns, row)) for row in cursor.fetchmany(max_rows)]
+                    row_count = len(rows)
+                else:
+                    columns = []
+                    rows = []
+                    row_count = cursor.rowcount
+                conn.close()
+
+            elif connection_string:
                 # Dynamic external SQL connection (e.g., MySQL, Postgres)
                 engine = create_async_engine(connection_string, echo=False)
                 async with engine.begin() as conn:
