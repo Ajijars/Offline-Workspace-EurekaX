@@ -6,6 +6,7 @@ and sets up CORS middleware for cross-origin access.
 """
 
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -38,6 +39,81 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 # ──────────────────────────────────────────────
+# Lifespan (startup / shutdown)
+# ──────────────────────────────────────────────
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Run startup tasks before the app begins serving requests."""
+    # Initialize SQLite database (creates tables if not exist)
+    from app.db.database import init_db
+    await init_db()
+
+    logger.info("=" * 55)
+    logger.info(f"  {settings.APP_TITLE} v{settings.APP_VERSION}")
+    logger.info(f"  Ollama URL   : {settings.OLLAMA_BASE_URL}")
+    logger.info(f"  Model        : {settings.OLLAMA_MODEL}")
+    logger.info(f"  Qdrant       : {settings.QDRANT_HOST}:{settings.QDRANT_PORT}")
+    logger.info(f"  Embedding    : {settings.EMBEDDING_MODEL}")
+    logger.info(f"  Chunk Size   : {settings.CHUNK_SIZE} (overlap: {settings.CHUNK_OVERLAP})")
+    logger.info("=" * 55)
+
+    # Ensure uploads directory exists
+    upload_path = Path(settings.UPLOAD_DIR)
+    upload_path.mkdir(parents=True, exist_ok=True)
+    logger.info(f"Upload dir: {upload_path.absolute()}")
+
+    # Check Ollama
+    from app.services.llm_service import ollama_service
+    is_healthy = await ollama_service.check_health()
+
+    if is_healthy:
+        logger.info("\u2713 Ollama is reachable and ready")
+    else:
+        logger.warning(
+            "\u2717 Ollama is NOT reachable at %s. "
+            "Start it with: ollama serve",
+            settings.OLLAMA_BASE_URL,
+        )
+
+    # Check Qdrant & initialize collection
+    try:
+        from app.services.vector_service import vector_service
+        qdrant_healthy = await vector_service.check_health()
+
+        if qdrant_healthy:
+            logger.info("\u2713 Qdrant is reachable and ready")
+            # Initialize collection
+            await vector_service.init_collection()
+        else:
+            logger.warning(
+                "\u2717 Qdrant is NOT reachable at %s:%s. "
+                "Start it with: docker-compose up -d",
+                settings.QDRANT_HOST,
+                settings.QDRANT_PORT,
+            )
+    except Exception as e:
+        logger.warning(f"\u2717 Qdrant check failed: {e}")
+
+    logger.info("\u2500" * 55)
+    logger.info("  RAG Pipeline : Ready (upload documents to get started)")
+    logger.info("  Agent System : Ready (LangGraph multi-agent workflow)")
+    logger.info("\u2500" * 55)
+
+    # Pre-compile LangGraph
+    try:
+        from app.agents.graph import agent_graph
+        if agent_graph is not None:
+            logger.info("\u2713 LangGraph agent workflow compiled and ready")
+        else:
+            logger.warning("\u2717 LangGraph agent workflow failed to compile")
+    except Exception as ag_err:
+        logger.warning(f"\u2717 LangGraph init error: {ag_err}")
+
+    yield  # App runs here
+
+
+# ──────────────────────────────────────────────
 # Create FastAPI App
 # ──────────────────────────────────────────────
 
@@ -50,6 +126,7 @@ app = FastAPI(
     ),
     docs_url="/docs",
     redoc_url="/redoc",
+    lifespan=lifespan,
 )
 
 # ──────────────────────────────────────────────
@@ -95,74 +172,4 @@ async def root():
     return RedirectResponse(url="/static/index.html")
 
 
-# ──────────────────────────────────────────────
-# Startup Event
-# ──────────────────────────────────────────────
 
-@app.on_event("startup")
-async def startup_event():
-    """Log startup info, check Ollama & Qdrant connectivity, init collections."""
-    # Initialize SQLite database (creates tables if not exist)
-    from app.db.database import init_db
-    await init_db()
-
-    logger.info("=" * 55)
-    logger.info(f"  {settings.APP_TITLE} v{settings.APP_VERSION}")
-    logger.info(f"  Ollama URL   : {settings.OLLAMA_BASE_URL}")
-    logger.info(f"  Model        : {settings.OLLAMA_MODEL}")
-    logger.info(f"  Qdrant       : {settings.QDRANT_HOST}:{settings.QDRANT_PORT}")
-    logger.info(f"  Embedding    : {settings.EMBEDDING_MODEL}")
-    logger.info(f"  Chunk Size   : {settings.CHUNK_SIZE} (overlap: {settings.CHUNK_OVERLAP})")
-    logger.info("=" * 55)
-
-    # Ensure uploads directory exists
-    upload_path = Path(settings.UPLOAD_DIR)
-    upload_path.mkdir(parents=True, exist_ok=True)
-    logger.info(f"Upload dir: {upload_path.absolute()}")
-
-    # Check Ollama
-    from app.services.llm_service import ollama_service
-    is_healthy = await ollama_service.check_health()
-
-    if is_healthy:
-        logger.info("✓ Ollama is reachable and ready")
-    else:
-        logger.warning(
-            "✗ Ollama is NOT reachable at %s. "
-            "Start it with: ollama serve",
-            settings.OLLAMA_BASE_URL,
-        )
-
-    # Check Qdrant & initialize collection
-    try:
-        from app.services.vector_service import vector_service
-        qdrant_healthy = await vector_service.check_health()
-
-        if qdrant_healthy:
-            logger.info("✓ Qdrant is reachable and ready")
-            # Initialize collection
-            await vector_service.init_collection()
-        else:
-            logger.warning(
-                "✗ Qdrant is NOT reachable at %s:%s. "
-                "Start it with: docker-compose up -d",
-                settings.QDRANT_HOST,
-                settings.QDRANT_PORT,
-            )
-    except Exception as e:
-        logger.warning(f"✗ Qdrant check failed: {e}")
-
-    logger.info("─" * 55)
-    logger.info("  RAG Pipeline : Ready (upload documents to get started)")
-    logger.info("  Agent System : Ready (LangGraph multi-agent workflow)")
-    logger.info("─" * 55)
-
-    # Pre-compile LangGraph
-    try:
-        from app.agents.graph import agent_graph
-        if agent_graph is not None:
-            logger.info("✓ LangGraph agent workflow compiled and ready")
-        else:
-            logger.warning("✗ LangGraph agent workflow failed to compile")
-    except Exception as ag_err:
-        logger.warning(f"✗ LangGraph init error: {ag_err}")

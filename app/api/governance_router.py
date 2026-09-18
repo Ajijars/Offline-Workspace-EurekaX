@@ -34,7 +34,7 @@ class DataSourceCreate(BaseModel):
 class CatalogEntryCreate(BaseModel):
     data_source_id: str
     table_name: str
-    schema_json: Optional[list] = None
+    schema_data: Optional[list] = None
     description: str = ""
     tags: str = ""
 
@@ -112,7 +112,7 @@ async def list_catalog(
 async def add_catalog_entry(body: CatalogEntryCreate, user: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
     return await catalog_service.add_entry(
         db, data_source_id=body.data_source_id, table_name=body.table_name,
-        schema_json=body.schema_json, description=body.description, tags=body.tags, updated_by=user.id,
+        schema_json=body.schema_data, description=body.description, tags=body.tags, updated_by=user.id,
     )
 
 @governance_router.get("/catalog/{entry_id}")
