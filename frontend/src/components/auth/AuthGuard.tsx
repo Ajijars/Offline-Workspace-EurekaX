@@ -32,7 +32,7 @@ export default function AuthGuard({ children, requireAdmin = false }: AuthGuardP
     }
 
     if (requireAdmin && user?.role !== 'admin') {
-      router.replace('/');
+      router.replace('/employee-home');
       return;
     }
   }, [isLoading, isAuthenticated, user, requireAdmin, router]);

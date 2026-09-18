@@ -6,6 +6,7 @@
 
 import { useAppStore } from '@/stores/appStore';
 import { Menu, Trash2 } from 'lucide-react';
+import ThemeToggle from '@/components/layout/ThemeToggle';
 
 const MODE_CONFIG = {
   chat: {
@@ -50,6 +51,7 @@ export default function ChatHeader() {
         <span className="header-subtitle">{currentModel}</span>
       </div>
       <div className="header-right">
+        <ThemeToggle />
         <button
           className="icon-btn icon-btn-md"
           onClick={clearMessages}

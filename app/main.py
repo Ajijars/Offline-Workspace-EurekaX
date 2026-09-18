@@ -166,5 +166,3 @@ async def startup_event():
             logger.warning("✗ LangGraph agent workflow failed to compile")
     except Exception as ag_err:
         logger.warning(f"✗ LangGraph init error: {ag_err}")
-
-# Trigger reload 2

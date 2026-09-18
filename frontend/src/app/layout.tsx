@@ -2,9 +2,9 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'SIH Assistant · AI Platform',
+  title: 'EurekaX · Enterprise Data Platform',
   description:
-    'SIH Local LLM Assistant – Offline AI with RAG Document Q&A and LangGraph Multi-Agent Orchestration powered by Ollama',
+    'EurekaX – Databricks-inspired unified workspace with AI-powered governance, security, SQL editor, notebooks, and multi-agent orchestration.',
 };
 
 export default function RootLayout({
@@ -13,8 +13,14 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" data-theme="dark" suppressHydrationWarning>
       <head>
+        {/* Anti-flash: apply theme from localStorage before React hydrates */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var t=localStorage.getItem('eureka-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);}catch(e){}})();`,
+          }}
+        />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link

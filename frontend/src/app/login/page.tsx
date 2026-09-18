@@ -4,8 +4,8 @@
  * Login / Register Page — premium glassmorphic split-panel auth UI.
  */
 
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { login, register } from '@/lib/auth';
 import { useAuthStore } from '@/stores/authStore';
 import {
@@ -21,8 +21,9 @@ import {
   Sparkles,
 } from 'lucide-react';
 
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { isAuthenticated, hydrate, setUser } = useAuthStore();
   const [isRegister, setIsRegister] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -45,6 +46,17 @@ export default function LoginPage() {
       router.replace(u?.role === 'admin' ? '/admin-home' : '/employee-home');
     }
   }, [isAuthenticated, router]);
+
+  useEffect(() => {
+    const roleParam = searchParams.get('role');
+    if (roleParam === 'admin') {
+      setEmail('admin@eurekax.io');
+      setPassword('admin123');
+    } else if (roleParam === 'employee') {
+      setEmail('rahul.ds@globaltech.com');
+      setPassword('employee123');
+    }
+  }, [searchParams]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -230,5 +242,13 @@ export default function LoginPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<div className="login-page"><div className="auth-loading"><div className="auth-loading-spinner" /></div></div>}>
+      <LoginForm />
+    </Suspense>
   );
 }

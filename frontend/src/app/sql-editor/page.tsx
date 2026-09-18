@@ -118,7 +118,7 @@ export default function SQLEditorPage() {
     setGeneratingSql(true);
     try {
       // Pass the schema context so Ollama knows the exact tables/columns
-      const res = await authFetch('http://localhost:8000/api/query/generate-sql', {
+      const res = await authFetch('/api/query/generate-sql', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ question: aiPrompt, schema_context: schema }),
@@ -237,7 +237,7 @@ export default function SQLEditorPage() {
         <Sidebar />
         <main className="chat-main">
           <div className="dashboard-page">
-            <Link href="/" className="back-link"><ArrowLeft size={16} /> Back to Chat</Link>
+            <Link href="/chat" className="back-link"><ArrowLeft size={16} /> Back to Chat</Link>
             <h1 className="dashboard-title">SQL Editor</h1>
             <p className="dashboard-subtitle">Execute queries against local or connected data sources</p>
 

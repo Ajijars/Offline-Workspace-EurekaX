@@ -51,7 +51,7 @@ export default function DashboardPage() {
         <Sidebar />
         <main className="chat-main">
           <div className="dashboard-page">
-            <Link href="/" className="back-link">
+            <Link href="/chat" className="back-link">
               <ArrowLeft size={16} />
               Back to Chat
             </Link>

@@ -8,6 +8,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, FileText, Filter, Download } from 'lucide-react';
 import AmbientBackground from '@/components/layout/AmbientBackground';
+import Sidebar from '@/components/layout/Sidebar';
 import AuthGuard from '@/components/auth/AuthGuard';
 import { authFetch } from '@/lib/auth';
 
@@ -48,9 +49,10 @@ export default function AuditPage() {
     <AuthGuard requireAdmin>
       <AmbientBackground />
       <div className="app-layout">
+        <Sidebar />
         <main className="chat-main">
           <div className="dashboard-page">
-            <Link href="/" className="back-link"><ArrowLeft size={16} /> Back to Chat</Link>
+            <Link href="/chat" className="back-link"><ArrowLeft size={16} /> Back to Chat</Link>
             <h1 className="dashboard-title">Audit Log</h1>
             <p className="dashboard-subtitle">Compliance trail — {total} events recorded</p>
 

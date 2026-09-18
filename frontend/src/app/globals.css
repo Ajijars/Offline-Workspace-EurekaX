@@ -91,6 +91,110 @@
   --shadow-agent-glow: 0 4px 16px var(--amber-dim);
 }
 
+/* ══════════════════════════════════════════════════════════
+   LIGHT THEME — Clean, airy enterprise look
+   ══════════════════════════════════════════════════════════ */
+[data-theme="light"] {
+  /* Background Palette — clean white/slate */
+  --bg-base:       #f8fafc;
+  --bg-surface:    #ffffff;
+  --bg-elevated:   #f1f5f9;
+  --bg-hover:      #e2e8f0;
+  --bg-active:     #cbd5e1;
+
+  /* Primary Accent — Indigo (same, works on light too) */
+  --primary:       #4f46e5;
+  --primary-light: #6366f1;
+  --primary-dim:   rgba(79, 70, 229, 0.10);
+  --primary-glow:  rgba(79, 70, 229, 0.07);
+
+  /* Secondary Accents — slightly deeper for contrast */
+  --cyan:          #0891b2;
+  --cyan-dim:      rgba(8, 145, 178, 0.10);
+  --amber:         #d97706;
+  --amber-dim:     rgba(217, 119, 6, 0.10);
+
+  /* Semantic */
+  --green:         #059669;
+  --green-dim:     rgba(5, 150, 105, 0.10);
+  --red:           #dc2626;
+  --red-dim:       rgba(220, 38, 38, 0.10);
+  --yellow:        #d97706;
+  --yellow-dim:    rgba(217, 119, 6, 0.10);
+
+  /* Text — dark on light */
+  --text-1: #0f172a;
+  --text-2: #475569;
+  --text-3: #94a3b8;
+  --text-4: #cbd5e1;
+
+  /* Borders — subtle light grey */
+  --border:        #e2e8f0;
+  --border-subtle: #f1f5f9;
+  --border-hover:  #cbd5e1;
+
+  /* Shadows — softer on light */
+  --shadow-sm: 0 1px 3px rgba(0,0,0,.08);
+  --shadow-md: 0 4px 12px rgba(0,0,0,.10);
+  --shadow-lg: 0 8px 32px rgba(0,0,0,.14);
+
+  /* Glass & legacy compat */
+  --bg-glass: rgba(255, 255, 255, 0.88);
+  --bg-glass-lite: rgba(0,0,0,0.02);
+  --chat-gradient: linear-gradient(135deg, #4338ca, #4f46e5);
+  --rag-gradient:  linear-gradient(135deg, #0369a1, #0891b2);
+  --agent-gradient: linear-gradient(135deg, #b45309, #d97706);
+  --rag-light: #0e7490;
+  --agent-light: #b45309;
+  --shadow-chat-glow: 0 4px 16px var(--primary-glow);
+  --shadow-rag-glow: 0 4px 16px var(--cyan-dim);
+  --shadow-agent-glow: 0 4px 16px var(--amber-dim);
+}
+
+/* Light theme specific overrides for hardcoded dark colours */
+[data-theme="light"] .audit-table tr:hover td {
+  background: rgba(0,0,0,0.025);
+}
+
+[data-theme="light"] .ambient-orb {
+  opacity: 0.06;
+}
+
+[data-theme="light"] .bubble-assistant pre,
+[data-theme="light"] .bubble-assistant code {
+  background: #f1f5f9;
+}
+
+[data-theme="light"] .sql-tab-count {
+  background: rgba(0,0,0,0.06);
+}
+
+[data-theme="light"] .login-orb-1 { opacity: 0.07; }
+[data-theme="light"] .login-orb-2 { opacity: 0.05; }
+
+[data-theme="light"] .mode-pill:hover {
+  background: rgba(0,0,0,0.04);
+}
+
+[data-theme="light"] select option {
+  background: #ffffff;
+  color: #0f172a;
+}
+
+/* Theme toggle button */
+.theme-toggle-btn {
+  transition: color var(--fast), background var(--fast), transform var(--base) var(--ease);
+}
+
+.theme-toggle-btn:hover {
+  transform: rotate(12deg) scale(1.08);
+}
+
+.theme-toggle-icon {
+  transition: transform var(--base) var(--ease);
+}
+
+
 /* ── Reset ── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 

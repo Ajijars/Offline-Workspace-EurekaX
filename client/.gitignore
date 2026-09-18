@@ -1,0 +1,25 @@
+# ─────────────────────────────────────────────────────
+# .gitignore for client/
+# ─────────────────────────────────────────────────────
+
+# Environment files (contain server IP — don't commit)
+config/.env.client
+frontend/.env.local
+
+# CA Certificate (sensitive — distribute via USB/internal only)
+certs/ca.crt
+certs/*.pem
+certs/*.key
+
+# Node modules
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+
+# Build artifacts
+frontend/.next/
+*.tsbuildinfo
+
+# OS files
+.DS_Store
+Thumbs.db

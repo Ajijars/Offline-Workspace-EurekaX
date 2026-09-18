@@ -79,8 +79,8 @@ export default function AdminPage() {
       const newRole = currentRole === 'admin' ? 'employee' : 'admin';
       await changeUserRole(userId, newRole);
       loadUsers();
-    } catch (err: any) {
-      alert(err.message || 'Failed to change role');
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to change role');
     }
   };
 
@@ -89,8 +89,8 @@ export default function AdminPage() {
     try {
       await deactivateUser(userId);
       loadUsers();
-    } catch (err: any) {
-      alert(err.message || 'Failed to delete user');
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to delete user');
     }
   };
 
@@ -135,7 +135,7 @@ export default function AdminPage() {
         <Sidebar />
         <main className="chat-main">
           <div className="dashboard-page">
-            <Link href="/" className="back-link"><ArrowLeft size={16} /> Back to Chat</Link>
+            <Link href="/chat" className="back-link"><ArrowLeft size={16} /> Back to Chat</Link>
             <h1 className="dashboard-title">Admin Panel</h1>
             <p className="dashboard-subtitle">Manage users, roles, and dataset permissions</p>
 

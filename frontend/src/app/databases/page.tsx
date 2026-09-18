@@ -78,7 +78,6 @@ export default function DatabasesPage() {
   const [sqlTables, setSqlTables] = useState<string[]>([]);
   const [sqlSelectedTable, setSqlSelectedTable] = useState('');
   const [sqlSchema, setSqlSchema] = useState<any[]>([]);
-  const [sqlConnStr, setSqlConnStr] = useState('mysql+aiomysql://root:root@localhost:3307/mysql');
   const [showHistory, setShowHistory] = useState(false);
   const [aiPrompt, setAiPrompt] = useState('');
   const [generatingSql, setGeneratingSql] = useState(false);

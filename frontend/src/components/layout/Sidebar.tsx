@@ -32,6 +32,7 @@ import type { ModelInfo } from '@/lib/types';
 import DocumentUpload from '@/components/rag/DocumentUpload';
 import DocumentList from '@/components/rag/DocumentList';
 import AgentFileUpload from '@/components/agent/AgentFileUpload';
+import ThemeToggle from '@/components/layout/ThemeToggle';
 
 export default function Sidebar() {
   const mode = useAppStore((s) => s.mode);
@@ -42,7 +43,7 @@ export default function Sidebar() {
   const handleModeChange = (newMode: 'chat' | 'rag' | 'agent') => {
     setMode(newMode);
     if (pathname !== '/') {
-      router.push('/');
+      router.push('/chat');
     }
   };
   const currentModel = useAppStore((s) => s.currentModel);
@@ -309,13 +310,16 @@ export default function Sidebar() {
                 {user.role === 'admin' ? '🛡️ Admin' : '👤 Employee'}
               </span>
             </div>
-            <button
-              className="icon-btn icon-btn-sm sidebar-logout-btn"
-              onClick={logout}
-              title="Logout"
-            >
-              <LogOut size={15} />
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <ThemeToggle size="sm" />
+              <button
+                className="icon-btn icon-btn-sm sidebar-logout-btn"
+                onClick={logout}
+                title="Logout"
+              >
+                <LogOut size={15} />
+              </button>
+            </div>
           </div>
         ) : (
           <div className="footer-badge">EurekaX v4.0</div>

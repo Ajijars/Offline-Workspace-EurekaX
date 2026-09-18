@@ -8,6 +8,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, Plus, Play, Trash2, Clock, CheckCircle, XCircle, GitBranch, Calendar, Edit2 } from 'lucide-react';
 import AmbientBackground from '@/components/layout/AmbientBackground';
+import Sidebar from '@/components/layout/Sidebar';
 import AuthGuard from '@/components/auth/AuthGuard';
 import { authFetch } from '@/lib/auth';
 
@@ -134,9 +135,10 @@ export default function PipelinesPage() {
     <AuthGuard>
       <AmbientBackground />
       <div className="app-layout">
+        <Sidebar />
         <main className="chat-main">
           <div className="dashboard-page">
-            <Link href="/" className="back-link"><ArrowLeft size={16} /> Back to Chat</Link>
+            <Link href="/chat" className="back-link"><ArrowLeft size={16} /> Back to Chat</Link>
             <h1 className="dashboard-title">Pipelines</h1>
             <p className="dashboard-subtitle">Build, run, and schedule ETL pipelines</p>
 

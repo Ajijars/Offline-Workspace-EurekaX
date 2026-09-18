@@ -43,18 +43,8 @@ export async function chatGenerate(req: ChatRequest): Promise<ChatResponse> {
   });
 }
 
-export function chatStream(req: ChatRequest): ReadableStream<Uint8Array> | null {
-  // Returns the raw response body stream for SSE consumption
-  const controller = new AbortController();
-  const promise = fetch(`${API_BASE}/chat/stream`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(req),
-    signal: controller.signal,
-  });
-  // We return a wrapper; caller should use readSSEStream()
-  return null; // see streamChat() below
-}
+// NOTE: chatStream is intentionally removed — use streamChat() instead.
+// It is the working SSE generator used by useChat.ts.
 
 /**
  * Initiate a streaming chat request and yield parsed SSE chunks.

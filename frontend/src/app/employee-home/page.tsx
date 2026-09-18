@@ -63,8 +63,8 @@ export default function EmployeeHomePage() {
   };
 
   const quickAccess = [
-    { href: '/', icon: MessageSquare, label: 'AI Chat', desc: 'Ask questions to the AI assistant', color: '#a78bfa', gradient: 'linear-gradient(135deg, rgba(124,58,237,0.12), rgba(167,139,250,0.08))' },
-    { href: '/', icon: Brain, label: 'RAG Documents', desc: 'Upload & query documents', color: '#f472b6', gradient: 'linear-gradient(135deg, rgba(236,72,153,0.12), rgba(244,114,182,0.08))' },
+    { href: '/chat', icon: MessageSquare, label: 'AI Chat', desc: 'Ask questions to the AI assistant', color: '#a78bfa', gradient: 'linear-gradient(135deg, rgba(124,58,237,0.12), rgba(167,139,250,0.08))' },
+    { href: '/chat', icon: Brain, label: 'RAG Documents', desc: 'Upload & query documents', color: '#f472b6', gradient: 'linear-gradient(135deg, rgba(236,72,153,0.12), rgba(244,114,182,0.08))' },
     { href: '/sql-editor', icon: Database, label: 'SQL Editor', desc: 'Query permitted datasets', color: '#38bdf8', gradient: 'linear-gradient(135deg, rgba(14,165,233,0.12), rgba(56,189,248,0.08))' },
     { href: '/workspace', icon: BookOpen, label: 'Notebooks', desc: 'Code notebooks & analysis', color: '#34d399', gradient: 'linear-gradient(135deg, rgba(16,185,129,0.12), rgba(52,211,153,0.08))' },
     { href: '/governance', icon: Layers, label: 'Data Catalog', desc: 'Browse available datasets', color: '#fbbf24', gradient: 'linear-gradient(135deg, rgba(245,158,11,0.12), rgba(251,191,36,0.08))' },

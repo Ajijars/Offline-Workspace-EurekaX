@@ -75,7 +75,7 @@ export default function GovernancePage() {
         <Sidebar />
         <main className="chat-main">
           <div className="dashboard-page">
-            <Link href="/" className="back-link"><ArrowLeft size={16} /> Back to Chat</Link>
+            <Link href="/chat" className="back-link"><ArrowLeft size={16} /> Back to Chat</Link>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 4 }}>
               <h1 className="dashboard-title" style={{ margin: 0 }}>Data Catalog</h1>
               {isEmployee && (

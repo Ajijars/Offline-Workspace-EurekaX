@@ -1,0 +1,27 @@
+{
+  "_comment": "Server connection info for EurekaX client. Update before deploying.",
+  "server": {
+    "ip": "192.168.1.100",
+    "https_port": 443,
+    "api_port": 8000,
+    "hostname": "eurekax-server",
+    "environment": "lan"
+  },
+  "tls": {
+    "ca_cert": "./certs/ca.crt",
+    "verify": true,
+    "min_version": "TLSv1.3"
+  },
+  "endpoints": {
+    "api_base": "https://192.168.1.100/api",
+    "ws_base": "wss://192.168.1.100/ws",
+    "health": "https://192.168.1.100/api/health",
+    "login": "https://192.168.1.100/api/auth/login",
+    "refresh": "https://192.168.1.100/api/auth/refresh"
+  },
+  "client": {
+    "port": 3000,
+    "name": "EurekaX Client",
+    "version": "1.0.0"
+  }
+}
