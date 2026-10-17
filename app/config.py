@@ -3,8 +3,8 @@ Application configuration loaded from environment variables.
 Uses pydantic-settings to validate and provide typed access to all config values.
 """
 
+import secrets
 from pydantic_settings import BaseSettings
-from pydantic import ConfigDict
 from functools import lru_cache
 
 
@@ -16,15 +16,15 @@ class Settings(BaseSettings):
     OLLAMA_MODEL: str = "qwen3:8b"
 
     # Application Settings
-    APP_TITLE: str = "SIH Local LLM Assistant"
-    APP_VERSION: str = "3.0.0"
+    APP_TITLE: str = "EurekaX Local LLM Assistant"
+    APP_VERSION: str = "4.0.0"
     APP_HOST: str = "0.0.0.0"
     APP_PORT: int = 8000
 
     # Qdrant Vector Database
     QDRANT_HOST: str = "localhost"
     QDRANT_PORT: int = 6333
-    QDRANT_COLLECTION_NAME: str = "sih_documents"
+    QDRANT_COLLECTION_NAME: str = "eurekax_documents"
 
     # Embedding Model
     EMBEDDING_MODEL: str = "BAAI/bge-small-en-v1.5"
@@ -50,7 +50,7 @@ class Settings(BaseSettings):
 
     # LangGraph Settings
     MAX_AGENT_ITERATIONS: int = 10
-    AGENT_TIMEOUT_SECONDS: int = 120
+    AGENT_TIMEOUT_SECONDS: int = 600
 
     # Databricks / Delta Lake (optional — Data Agent)
     DATABRICKS_HOST: str = ""
@@ -64,12 +64,22 @@ class Settings(BaseSettings):
     MONGODB_DEFAULT_DB: str = ""
 
     # JWT / Authentication
+    # IMPORTANT: Override this in .env with a strong random secret.
+    # Generate with: python -c "import secrets; print(secrets.token_urlsafe(64))"
     JWT_SECRET_KEY: str = "eurekax-super-secret-change-me-in-production"
     JWT_ALGORITHM: str = "HS256"
-    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
-    JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440  # 24 hours — survives between-day sessions
+    JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 30
 
-    model_config = ConfigDict(env_file=".env", env_file_encoding="utf-8")
+    # CORS — allowed frontend origins (comma-separated in .env)
+    CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"
+
+    # Database URL (for catalog/external queries, defaults to local SQLite)
+    DATABASE_URL: str = "sqlite+aiosqlite:///data/eurekax.db"
+
+    class Config:
+        env_file = ".env"
+        env_file_encoding = "utf-8"
 
 
 @lru_cache()

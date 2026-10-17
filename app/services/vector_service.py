@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Optional
 
 from qdrant_client import QdrantClient
+from tenacity import retry, stop_after_attempt, wait_exponential
 from qdrant_client.models import (
     Distance,
     FieldCondition,
@@ -22,6 +23,13 @@ from qdrant_client.models import (
     MatchValue,
     PointStruct,
     VectorParams,
+    ScrollRequest,
+    SparseVectorParams,
+    SparseIndexParams,
+    SparseVector,
+    Prefetch,
+    FusionQuery,
+    Fusion,
 )
 
 from app.config import get_settings
@@ -73,10 +81,21 @@ class VectorService:
         _ = self.client  # Ensure initialized
         return self._mode
 
+    def supports_sparse(self) -> bool:
+        """Check if the target collection is configured with the 'sparse' vector."""
+        try:
+            info = self.client.get_collection(self.collection_name)
+            sparse_config = getattr(getattr(info, "config", None), "params", None)
+            sparse_dict = getattr(sparse_config, "sparse_vectors", None)
+            return bool(sparse_dict and "sparse" in sparse_dict)
+        except Exception:
+            return False
+
     # ──────────────────────────────────────────────
     # Collection Management
     # ──────────────────────────────────────────────
 
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=5))
     async def init_collection(self) -> bool:
         """
         Create the vector collection if it doesn't exist.
@@ -94,9 +113,45 @@ class VectorService:
                         size=self.dimension,
                         distance=Distance.COSINE
                     ),
+                    sparse_vectors_config={
+                        "sparse": SparseVectorParams(
+                            index=SparseIndexParams(on_disk=False)
+                        )
+                    }
                 )
                 logger.info(f"Created Qdrant collection: {self.collection_name}")
             else:
+                # Ensure sparse config is enabled for existing collections
+                if not self.supports_sparse():
+                    try:
+                        info = self.client.get_collection(self.collection_name)
+                        points_count = getattr(info, "points_count", 0) or 0
+                        if points_count == 0:
+                            logger.info(f"Recreating empty collection '{self.collection_name}' with sparse vector support")
+                            self.client.delete_collection(self.collection_name)
+                            self.client.create_collection(
+                                collection_name=self.collection_name,
+                                vectors_config=VectorParams(
+                                    size=self.dimension,
+                                    distance=Distance.COSINE
+                                ),
+                                sparse_vectors_config={
+                                    "sparse": SparseVectorParams(
+                                        index=SparseIndexParams(on_disk=False)
+                                    )
+                                }
+                            )
+                        else:
+                            self.client.update_collection(
+                                collection_name=self.collection_name,
+                                sparse_vectors_config={
+                                    "sparse": SparseVectorParams(
+                                        index=SparseIndexParams(on_disk=False)
+                                    )
+                                }
+                            )
+                    except Exception as e:
+                        logger.warning(f"Could not update/recreate collection for sparse: {e}")
                 logger.info(f"Qdrant collection exists: {self.collection_name}")
 
             return True
@@ -113,16 +168,30 @@ class VectorService:
             logger.warning(f"Qdrant health check failed: {e}")
             return False
 
+    async def get_collection_stats(self) -> dict:
+        """Return collection statistics (vector count, etc.)."""
+        try:
+            info = self.client.get_collection(self.collection_name)
+            return {
+                "vectors_count": info.vectors_count,
+                "points_count": info.points_count,
+                "status": str(info.status),
+            }
+        except Exception:
+            return {"vectors_count": 0}
+
     # ──────────────────────────────────────────────
     # CRUD Operations
     # ──────────────────────────────────────────────
 
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=5))
     async def upsert_chunks(
         self,
         doc_id: str,
         chunks: list[str],
         vectors: list[list[float]],
-        metadata: dict
+        sparse_vectors: Optional[list[dict]] = None,
+        metadata: Optional[dict] = None
     ) -> int:
         """
         Store document chunks with their embeddings in Qdrant.
@@ -139,32 +208,61 @@ class VectorService:
         if len(chunks) != len(vectors):
             raise ValueError("chunks and vectors must have the same length")
 
+        if metadata is None:
+            metadata = {}
+
+        can_use_sparse = self.supports_sparse()
+
         points = []
-        for i, (chunk, vector) in enumerate(zip(chunks, vectors)):
+        for i, chunk in enumerate(chunks):
+            vector = vectors[i]
+            sparse = sparse_vectors[i] if (can_use_sparse and sparse_vectors and i < len(sparse_vectors)) else None
             point_id = str(uuid.uuid4())
+            vector_dict = {"": vector}
+            if sparse and isinstance(sparse, dict) and sparse.get("indices") and len(sparse["indices"]) > 0:
+                vector_dict["sparse"] = SparseVector(
+                    indices=sparse["indices"],
+                    values=sparse["values"]
+                )
             points.append(
                 PointStruct(
                     id=point_id,
-                    vector=vector,
+                    vector=vector_dict,
                     payload={
                         "doc_id": doc_id,
                         "chunk_index": i,
                         "chunk_text": chunk,
                         "filename": metadata.get("filename", ""),
                         "file_type": metadata.get("file_type", ""),
+                        "file_path": metadata.get("file_path", ""),
                         "total_chunks": len(chunks),
                     }
                 )
             )
 
-        # Upsert in batches of 100
+        # Upsert in batches of 100 with resilient dense fallback
         batch_size = 100
-        for start in range(0, len(points), batch_size):
-            batch = points[start:start + batch_size]
-            self.client.upsert(
-                collection_name=self.collection_name,
-                points=batch
-            )
+        try:
+            for start in range(0, len(points), batch_size):
+                batch = points[start:start + batch_size]
+                self.client.upsert(
+                    collection_name=self.collection_name,
+                    points=batch
+                )
+        except Exception as e:
+            if "Not existing vector name error" in str(e) or "sparse" in str(e).lower():
+                logger.warning(f"Upsert with sparse failed ({e}), retrying dense-only...")
+                for idx_p, p in enumerate(points):
+                    if isinstance(p.vector, dict) and "sparse" in p.vector:
+                        p.vector = {"": vectors[idx_p]}
+                for start in range(0, len(points), batch_size):
+                    batch = points[start:start + batch_size]
+                    self.client.upsert(
+                        collection_name=self.collection_name,
+                        points=batch
+                    )
+            else:
+                raise
 
         logger.info(
             f"Stored {len(points)} chunks for doc '{doc_id}' "
@@ -172,9 +270,11 @@ class VectorService:
         )
         return len(points)
 
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=5))
     async def search(
         self,
         query_vector: list[float],
+        sparse_query_vector: Optional[dict] = None,
         top_k: int = 5,
         doc_id: Optional[str] = None
     ) -> list[dict]:
@@ -200,18 +300,61 @@ class VectorService:
                 ]
             )
 
-        results = self.client.search(
-            collection_name=self.collection_name,
-            query_vector=query_vector,
-            limit=top_k,
-            query_filter=search_filter,
-            with_payload=True,
+        can_use_sparse = self.supports_sparse()
+        has_sparse = (
+            can_use_sparse
+            and sparse_query_vector 
+            and isinstance(sparse_query_vector, dict) 
+            and sparse_query_vector.get("indices") 
+            and len(sparse_query_vector["indices"]) > 0
         )
+        try:
+            if has_sparse:
+                results = self.client.query_points(
+                    collection_name=self.collection_name,
+                    prefetch=[
+                        Prefetch(
+                            query=query_vector,
+                            using="",
+                            limit=top_k * 2,
+                            filter=search_filter,
+                        ),
+                        Prefetch(
+                            query=SparseVector(
+                                indices=sparse_query_vector["indices"],
+                                values=sparse_query_vector["values"]
+                            ),
+                            using="sparse",
+                            limit=top_k * 2,
+                            filter=search_filter,
+                        ),
+                    ],
+                    query=FusionQuery(fusion=Fusion.RRF),
+                    limit=top_k,
+                    with_payload=True,
+                ).points
+            else:
+                results = self.client.search(
+                    collection_name=self.collection_name,
+                    query_vector=query_vector,
+                    limit=top_k,
+                    query_filter=search_filter,
+                    with_payload=True,
+                )
+        except Exception as e:
+            logger.warning(f"Hybrid search failed, falling back to dense search: {e}")
+            results = self.client.search(
+                collection_name=self.collection_name,
+                query_vector=query_vector,
+                limit=top_k,
+                query_filter=search_filter,
+                with_payload=True,
+            )
 
         return [
             {
                 "chunk_text": hit.payload.get("chunk_text", ""),
-                "score": round(hit.score, 4),
+                "score": round(hit.score, 4) if hit.score is not None else 0.0,
                 "filename": hit.payload.get("filename", ""),
                 "chunk_index": hit.payload.get("chunk_index", 0),
                 "doc_id": hit.payload.get("doc_id", ""),
@@ -238,6 +381,50 @@ class VectorService:
         except Exception as e:
             logger.error(f"Failed to delete document {doc_id}: {e}")
             return False
+
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=5))
+    async def get_document_chunks(self, doc_id: str) -> list[str]:
+        """
+        Retrieve all text chunks for a specific document from Qdrant.
+        Useful for document comparison and full-text extraction.
+        """
+        try:
+            chunks = []
+            offset = None
+            
+            while True:
+                response = self.client.scroll(
+                    collection_name=self.collection_name,
+                    scroll_filter=Filter(
+                        must=[
+                            FieldCondition(
+                                key="doc_id",
+                                match=MatchValue(value=doc_id),
+                            )
+                        ]
+                    ),
+                    limit=100,
+                    offset=offset,
+                    with_payload=True,
+                    with_vectors=False,
+                )
+                
+                records, next_page_offset = response
+                
+                for record in records:
+                    if record.payload and "chunk_text" in record.payload:
+                        chunks.append(record.payload["chunk_text"])
+                        
+                if next_page_offset is None:
+                    break
+                offset = next_page_offset
+                
+            logger.info(f"Retrieved {len(chunks)} chunks for document {doc_id}")
+            return chunks
+            
+        except Exception as e:
+            logger.error(f"Error retrieving chunks for {doc_id} from Qdrant: {e}")
+            return []
 
     async def list_documents(self) -> list[dict]:
         """
@@ -268,6 +455,7 @@ class VectorService:
                             "doc_id": doc_id,
                             "filename": point.payload.get("filename", ""),
                             "file_type": point.payload.get("file_type", ""),
+                            "file_path": point.payload.get("file_path", ""),
                             "chunk_count": 0,
                         }
                     documents[doc_id]["chunk_count"] += 1

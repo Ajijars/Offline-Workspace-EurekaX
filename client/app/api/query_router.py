@@ -1,0 +1,321 @@
+"""
+Query API Router — SQL and MongoDB query execution, history, saved queries.
+"""
+
+import json
+import logging
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
+from typing import Optional
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.auth.security import get_current_user
+from app.db.database import get_db
+from app.db.models import User, Permission
+from app.security.query_sanitizer import query_sanitizer
+from app.security.anomaly_detector import anomaly_detector
+from app.services.audit_service import audit_service
+from app.services.catalog_service import catalog_service
+from sqlalchemy import select
+
+logger = logging.getLogger(__name__)
+query_router = APIRouter(prefix="/api/query", tags=["Query"])
+
+
+class SQLQueryRequest(BaseModel):
+    sql: str = Field(..., min_length=1)
+    source_name: str = "local"
+    max_rows: int = Field(default=500, le=5000)
+
+class MongoQueryRequest(BaseModel):
+    database: str
+    collection: str
+    operation: str = "find"  # find, aggregate
+    filter: Optional[dict] = None
+    pipeline: Optional[list] = None
+    limit: int = Field(default=100, le=1000)
+
+class SaveQueryRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    query_text: str = Field(..., min_length=1)
+    source_name: str = ""
+    description: str = ""
+
+class NL2SQLRequest(BaseModel):
+    question: str = Field(..., min_length=1)
+    dataset_name: Optional[str] = None
+    schema_context: Optional[list] = None  # Frontend can pass explicit schema
+    model: Optional[str] = None
+
+
+# ── SQL ──
+
+@query_router.post("/sql")
+async def execute_sql(
+    body: SQLQueryRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Execute a SQL query with role-based sanitization."""
+    # Rate limit check
+    allowed, reason = anomaly_detector.check_rate_limit(user.id)
+    if not allowed:
+        raise HTTPException(status_code=429, detail=reason)
+
+    # Sanitize query based on role
+    sanitize = query_sanitizer.sanitize_sql(body.sql, role=user.role)
+    if not sanitize.is_safe:
+        await audit_service.log(db, user_id=user.id, action="blocked_query", resource_type="sql", details={"reason": sanitize.blocked_reason, "sql": body.sql[:500]})
+        raise HTTPException(status_code=403, detail=sanitize.blocked_reason)
+
+    # Dataset Permission Check
+    if user.role != "admin":
+        import re
+        all_entries = await catalog_service.list_entries(db)
+        # Get permitted IDs
+        perm_res = await db.execute(
+            select(Permission.resource_id).where(
+                Permission.user_id == user.id,
+                Permission.resource_type == "catalog_entry"
+            )
+        )
+        permitted_ids = {int(r[0]) for r in perm_res.all()}
+        
+        # Check against restricted tables
+        for entry in all_entries:
+            if entry["id"] not in permitted_ids:
+                # If restricted table name appears in query as a whole word (case-insensitive)
+                pattern = rf"\b{re.escape(entry['table_name'])}\b"
+                if re.search(pattern, body.sql, re.IGNORECASE):
+                    msg = f"Access denied: You do not have permission to query dataset '{entry['table_name']}'"
+                    await audit_service.log(db, user_id=user.id, action="blocked_query", resource_type="sql", details={"reason": "unauthorized_dataset", "table": entry['table_name']})
+                    raise HTTPException(status_code=403, detail=msg)
+
+    from app.services.sql_service import sql_service
+    
+    result = await sql_service.execute(
+        db, sql=body.sql, source_name=body.source_name, user_id=user.id, max_rows=body.max_rows
+    )
+    
+    await audit_service.log(db, user_id=user.id, action="sql_query", resource_type="sql", details={"source": body.source_name, "rows": result.get("row_count", 0)})
+
+    # PII Scanning on Output
+    if result.get("rows"):
+        from app.security.guardrails import guardrails
+        rows_str = json.dumps(result["rows"])
+        scan_res = guardrails.scan_output(rows_str, role=user.role)
+        if not scan_res.is_safe:
+            # Re-parse the sanitized JSON string if it was modified
+            try:
+                result["rows"] = json.loads(scan_res.sanitized_text or rows_str)
+            except json.JSONDecodeError:
+                result["rows"] = [{"error": "Output redacted due to PII violations."}]
+                
+            await audit_service.log(db, user_id=user.id, action="pii_redacted", resource_type="sql", details={"violations": [v["category"] for v in scan_res.violations]})
+            
+            # Log as a security alert
+            await anomaly_detector.create_alert(
+                db, user_id=user.id, alert_type="pii_leak_attempt", severity="high",
+                message=f"PII detected and redacted in query output. Violations: {len(scan_res.violations)}"
+            )
+
+    # Check for bulk extraction
+    bulk_msg = anomaly_detector.check_bulk_extraction(result.get("row_count", 0), user.id)
+    if bulk_msg:
+        await anomaly_detector.create_alert(db, user_id=user.id, alert_type="bulk_extract", severity="medium", message=bulk_msg)
+
+    return result
+
+
+@query_router.post("/generate-sql")
+async def generate_sql(
+    body: NL2SQLRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Generate SQL from natural language using Ollama."""
+    from app.services.llm_service import ollama_service
+    import re
+    
+    # Try to fetch schema to give context to the LLM
+    schema_context = ""
+    
+    # If the frontend passes explicit schema context (e.g., selected from Schema Explorer)
+    if body.schema_context:
+        for table in body.schema_context:
+            t_name = table.get("table_name") or table.get("table") or ""
+            if t_name:
+                schema_context += f"Table: {t_name}\n"
+            columns = table.get("columns", [])
+            if columns:
+                if isinstance(columns[0], dict):
+                    col_strs = [c.get("name", "") + (f" ({c.get('type')})" if c.get("type") else "") for c in columns]
+                    schema_context += f"Columns: {', '.join(col_strs)}\n\n"
+                else:
+                    schema_context += f"Columns: {', '.join([str(c) for c in columns])}\n\n"
+    else:
+        # Fallback: scan catalog entries
+        all_entries = await catalog_service.list_entries(db)
+        for entry in all_entries:
+            if body.dataset_name and body.dataset_name.lower() in entry["table_name"].lower():
+                schema_context += f"Table: {entry['table_name']}\n"
+                if entry.get("schema"):
+                    schema_context += f"Columns: {', '.join([c.get('name', '') for c in entry['schema']])}\n"
+                schema_context += "\n"
+            elif not body.dataset_name:  # if no specific dataset, provide all (truncated if too many)
+                schema_context += f"Table: {entry['table_name']}\n"
+
+    # Select appropriate model:
+    # 1. If explicit coder model was requested, use it
+    # 2. If no model specified or general model requested, prioritize installed coder model for speed and accuracy
+    target_model = body.model
+    coder_model = None
+    try:
+        available_models = await ollama_service.list_models()
+        for m in available_models:
+            m_name = m.get("name", "").lower()
+            if "coder" in m_name or "code" in m_name:
+                coder_model = m["name"]
+                break
+    except Exception:
+        pass
+
+    if target_model and "coder" in target_model.lower():
+        selected_model = target_model
+    elif coder_model:
+        selected_model = coder_model
+    elif target_model:
+        selected_model = target_model
+    else:
+        selected_model = ollama_service.default_model
+
+    prompt = (
+        "You are an expert SQL generator. Convert the following natural language request into a valid SQL query.\n"
+        "Output ONLY the SQL query, nothing else, no markdown formatting (do not wrap in ```sql). Do not provide explanations.\n"
+    )
+    if schema_context:
+        prompt += f"Here are the available tables and columns for context:\n{schema_context[:3000]}\n"
+        
+    prompt += f"Request: {body.question}"
+    
+    try:
+        res = await ollama_service.generate(prompt=prompt, model=selected_model, temperature=0.0)
+        raw_output = res.get("response", "").strip()
+        # Clean markdown code blocks if the LLM wrapped it
+        sql = re.sub(r"^```sql\s*", "", raw_output, flags=re.IGNORECASE)
+        sql = re.sub(r"^```\s*", "", sql, flags=re.IGNORECASE)
+        sql = re.sub(r"\s*```$", "", sql, flags=re.IGNORECASE).strip()
+        return {"sql": sql, "model": selected_model}
+    except Exception as e:
+        logger.error(f"Failed to generate SQL with model {selected_model}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate SQL query: {str(e)}")
+
+
+# ── Database Schema Introspection ──
+
+@query_router.get("/schema")
+async def get_sql_schema(
+    source_id: Optional[str] = None,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get the SQL schema (tables and columns) for local SQLite, external SQL, or catalog CSVs."""
+    from app.services.sql_service import sql_service
+    from app.services.catalog_service import DataSource
+    connection_string = None
+    
+    if source_id and source_id != "local":
+        # Fetch the DataSource directly to get the hidden connection_config
+        source = (await db.execute(select(DataSource).where(DataSource.id == source_id))).scalar_one_or_none()
+        if not source:
+            raise HTTPException(status_code=404, detail="Data source not found")
+            
+        try:
+            config = json.loads(source.connection_config) if source.connection_config else {}
+            connection_string = config.get("connection_string")
+        except:
+            pass
+            
+        # If there's no connection string (e.g. it's a CSV source or incomplete config),
+        # don't fallback to the local SQLite DB! Instead, fetch from catalog_entries.
+        if not connection_string:
+            entries = await catalog_service.list_entries(db, source_id=source_id)
+            schema = []
+            for entry in entries:
+                cols = [{"name": c["name"], "type": c.get("type", "TEXT")} for c in entry.get("schema", [])]
+                schema.append({"table_name": entry["table_name"], "columns": cols})
+            return {"schema": schema}
+
+    schema = await sql_service.get_schema(db, connection_string)
+    return {"schema": schema}
+
+
+# ── MongoDB ──
+
+@query_router.post("/mongodb")
+async def execute_mongodb(
+    body: MongoQueryRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Execute a MongoDB query."""
+    allowed, reason = anomaly_detector.check_rate_limit(user.id)
+    if not allowed:
+        raise HTTPException(status_code=429, detail=reason)
+
+    from app.services.mongodb_service import mongodb_service
+    if not mongodb_service.available:
+        raise HTTPException(status_code=501, detail="MongoDB not available (pymongo not installed)")
+
+    if body.operation == "find":
+        result = mongodb_service.execute_find(
+            body.database, body.collection,
+            filter_doc=body.filter, limit=body.limit,
+        )
+    elif body.operation == "aggregate":
+        if not body.pipeline:
+            raise HTTPException(status_code=400, detail="Pipeline required for aggregate")
+        result = mongodb_service.execute_aggregate(body.database, body.collection, body.pipeline)
+    else:
+        raise HTTPException(status_code=400, detail=f"Unknown operation: {body.operation}")
+
+    await audit_service.log(db, user_id=user.id, action="mongodb_query", resource_type="mongodb", details={"db": body.database, "collection": body.collection})
+    return result
+
+
+# ── MongoDB Browser ──
+
+@query_router.get("/mongodb/databases")
+async def list_mongo_databases(user: User = Depends(get_current_user)):
+    from app.services.mongodb_service import mongodb_service
+    if not mongodb_service.available:
+        return {"databases": [], "available": False}
+    return {"databases": mongodb_service.list_databases(), "available": True}
+
+@query_router.get("/mongodb/collections/{database}")
+async def list_mongo_collections(database: str, user: User = Depends(get_current_user)):
+    from app.services.mongodb_service import mongodb_service
+    return {"collections": mongodb_service.list_collections(database)}
+
+@query_router.get("/mongodb/schema/{database}/{collection}")
+async def get_mongo_schema(database: str, collection: str, user: User = Depends(get_current_user)):
+    from app.services.mongodb_service import mongodb_service
+    return {"schema": mongodb_service.infer_schema(database, collection)}
+
+
+# ── History & Saved ──
+
+@query_router.get("/history")
+async def get_history(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    from app.services.sql_service import sql_service
+    return await sql_service.get_history(db, user_id=user.id)
+
+@query_router.post("/save")
+async def save_query(body: SaveQueryRequest, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    from app.services.sql_service import sql_service
+    return await sql_service.save_query(db, user_id=user.id, name=body.name, query_text=body.query_text, source_name=body.source_name, description=body.description)
+
+@query_router.get("/saved")
+async def get_saved(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    from app.services.sql_service import sql_service
+    return await sql_service.get_saved_queries(db, user_id=user.id)

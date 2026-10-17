@@ -12,6 +12,8 @@ import AmbientBackground from '@/components/layout/AmbientBackground';
 import Sidebar from '@/components/layout/Sidebar';
 import AuthGuard from '@/components/auth/AuthGuard';
 import { authFetch } from '@/lib/auth';
+import { STREAM_BASE } from '@/lib/constants';
+import { useAppStore } from '@/stores/appStore';
 
 interface QueryResult {
   success: boolean; columns: string[]; rows: Record<string, unknown>[];
@@ -39,6 +41,7 @@ export default function SQLEditorPage() {
   const [generatingSql, setGeneratingSql] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const router = useRouter();
+  const currentModel = useAppStore((s) => s.currentModel);
 
   // Schema Explorer State
   const [sources, setSources] = useState<any[]>([{ id: 'local', name: 'Local SQLite (Default)' }]);
@@ -117,12 +120,25 @@ export default function SQLEditorPage() {
     if (!aiPrompt.trim()) return;
     setGeneratingSql(true);
     try {
-      // Pass the schema context so Ollama knows the exact tables/columns
-      const res = await authFetch('/api/query/generate-sql', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question: aiPrompt, schema_context: schema }),
-      });
+      const payload = JSON.stringify({ question: aiPrompt, schema_context: schema, model: currentModel });
+      const reqHeaders = { 'Content-Type': 'application/json' };
+      
+      let res: Response;
+      try {
+        // Attempt direct connection first (bypasses Next.js 30s dev proxy timeout)
+        res = await authFetch(`${STREAM_BASE}/query/generate-sql`, {
+          method: 'POST',
+          headers: reqHeaders,
+          body: payload,
+        });
+      } catch {
+        // Fallback to same-origin proxy route if direct connection was blocked or refused
+        res = await authFetch('/api/query/generate-sql', {
+          method: 'POST',
+          headers: reqHeaders,
+          body: payload,
+        });
+      }
       
       if (!res.ok) {
         const contentType = res.headers.get('content-type');
@@ -130,8 +146,7 @@ export default function SQLEditorPage() {
           const data = await res.json();
           alert(`API Error: ${data.detail || 'Failed to generate SQL'}`);
         } else {
-          // If it's not JSON, it's likely a Next.js proxy timeout (504) or crash (500)
-          alert(`Timeout Error (${res.status}): The AI model took too long to respond. This usually happens on the first request while Ollama is loading the model into memory. Please wait a moment and try again!`);
+          alert(`Error (${res.status}): The local AI model took too long to respond. Please wait a moment and try again.`);
         }
         setGeneratingSql(false);
         return;
@@ -144,7 +159,7 @@ export default function SQLEditorPage() {
         alert('Received empty response from the AI model.');
       }
     } catch (err) {
-      alert(`Network connection failed. Make sure your local server is running. (${err instanceof Error ? err.message : 'Unknown error'})`);
+      alert(`Local server connection failed. Please ensure the local backend server is running on port 8000. (Note: No internet connection is needed — EurekaX operates 100% locally). Details: ${err instanceof Error ? err.message : 'Unknown error'}`);
     }
     setGeneratingSql(false);
   };

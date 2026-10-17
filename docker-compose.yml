@@ -1,12 +1,77 @@
 # ============================================
-# SIH Project – Docker Compose
-# Qdrant Vector Database for RAG Pipeline
+# EurekaX Project – Full Docker Compose Stack
+# One command to boot everything: docker-compose up
 # ============================================
 
 services:
+
+  # ── Backend: FastAPI (Python 3.11) ──
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: eurekax_backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./uploads:/app/uploads
+      - ./workspace:/app/workspace
+      - ./sandbox:/app/sandbox
+      - ./data:/app/data
+      - ./secure_storage:/app/secure_storage
+    env_file: .env
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+    depends_on:
+      qdrant:
+        condition: service_started
+      ollama:
+        condition: service_started
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/api/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ── Frontend: Next.js 16 ──
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: eurekax_frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://backend:8000
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  # ── LLM Engine: Ollama ──
+  ollama:
+    image: ollama/ollama:latest
+    container_name: eurekax_ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    restart: unless-stopped
+    # Uncomment for GPU support:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  # ── Vector Database: Qdrant ──
   qdrant:
     image: qdrant/qdrant:latest
-    container_name: sih_qdrant
+    container_name: eurekax_qdrant
     ports:
       - "6333:6333"   # REST API
       - "6334:6334"   # gRPC
@@ -16,6 +81,24 @@ services:
     environment:
       - QDRANT__SERVICE__GRPC_PORT=6334
 
+  # ── MySQL (optional — for Data Catalog SQL queries) ──
+  # Uncomment if you need MySQL as a data source:
+  # mysql:
+  #   image: mysql:8.0
+  #   container_name: eurekax_mysql
+  #   ports:
+  #     - "3307:3306"
+  #   environment:
+  #     MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+  #     MYSQL_DATABASE: eurekax
+  #   volumes:
+  #     - mysql_data:/var/lib/mysql
+  #   restart: unless-stopped
+
 volumes:
   qdrant_data:
     driver: local
+  ollama_models:
+    driver: local
+  # mysql_data:
+  #   driver: local

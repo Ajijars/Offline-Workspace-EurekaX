@@ -1,10 +1,11 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import AppProviders from '@/components/ui/AppProviders';
 
 export const metadata: Metadata = {
   title: 'EurekaX · Enterprise Data Platform',
   description:
-    'EurekaX – Databricks-inspired unified workspace with AI-powered governance, security, SQL editor, notebooks, and multi-agent orchestration.',
+    'EurekaX – Offline AI Workbench with RAG, LangGraph Agents, OKF, SQL Editor, Notebooks, and enterprise governance.',
 };
 
 export default function RootLayout({
@@ -28,7 +29,9 @@ export default function RootLayout({
           rel="stylesheet"
         />
       </head>
-      <body>{children}</body>
+      <body>
+        <AppProviders>{children}</AppProviders>
+      </body>
     </html>
   );
 }

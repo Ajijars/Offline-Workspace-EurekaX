@@ -1,12 +1,12 @@
 """
 Vision Agent – Image Understanding & OCR.
 
-Extracts text from images using pytesseract OCR, then uses the LLM
-to answer questions about the image content.
+Extracts text from images using PaddleOCR (primary) or pytesseract (fallback),
+then uses the LLM to answer questions about the image content.
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from app.agents.state import AgentState
@@ -51,10 +51,44 @@ async def vision_agent_node(state: AgentState) -> AgentState:
         "agent": "vision_agent",
         "action": "image_ocr",
         "result": "",
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
-    # Find an image file
+    # Handle direct base64 image uploads from frontend
+    images = state.get("images", [])
+    if images:
+        try:
+            step["result"] = f"Processing {len(images)} uploaded image(s) via multimodal LLM."
+            
+            prompt = f"You are a vision assistant. Analyze the provided image(s) and answer the following question: {query}"
+            
+            # Pass images directly to ollama
+            llm_result = await ollama_service.generate(
+                prompt=prompt, 
+                temperature=0.4,
+                images=images
+            )
+            answer = llm_result["response"]
+            
+            return {
+                **state,
+                "final_answer": answer,
+                "active_agent": "vision_agent",
+                "agent_steps": state.get("agent_steps", []) + [step],
+            }
+        except Exception as e:
+            logger.error(f"[Vision Agent] Multimodal error: {e}", exc_info=True)
+            answer = f"Vision processing failed: {e}"
+            step["result"] = f"Error: {e}"
+            
+            return {
+                **state,
+                "final_answer": answer,
+                "active_agent": "vision_agent",
+                "agent_steps": state.get("agent_steps", []) + [step],
+            }
+
+    # Find an image file (fallback for local file paths)
     image_file = None
     for fp in file_paths:
         if any(fp.lower().endswith(ext) for ext in _IMAGE_EXTENSIONS):

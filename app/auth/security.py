@@ -25,6 +25,15 @@ from app.db.models import User
 
 logger = logging.getLogger(__name__)
 
+# ── Token Revocation (In-Memory Blocklist) ──
+_revoked_tokens = set()
+
+def revoke_token(token: str) -> None:
+    _revoked_tokens.add(token)
+
+def is_token_revoked(token: str) -> bool:
+    return token in _revoked_tokens
+
 # ── Password hashing ──
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")

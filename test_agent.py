@@ -21,7 +21,7 @@ async def test_agent():
     token = create_access_token({"sub": admin_id})
     print(f"Generated Token for Admin ID {admin_id}: {token[:10]}...")
     
-    async with httpx.AsyncClient(timeout=120.0) as client:
+    async with httpx.AsyncClient(timeout=300.0) as client:
         # Call agent
         headers = {"Authorization": f"Bearer {token}"}
         print("Sending prompt to Agent...")

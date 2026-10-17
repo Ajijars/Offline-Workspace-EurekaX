@@ -17,7 +17,9 @@ import AmbientBackground from '@/components/layout/AmbientBackground';
 import Sidebar from '@/components/layout/Sidebar';
 import AuthGuard from '@/components/auth/AuthGuard';
 import { useAuthStore } from '@/stores/authStore';
+import { useAppStore } from '@/stores/appStore';
 import { authFetch } from '@/lib/auth';
+import { STREAM_BASE } from '@/lib/constants';
 
 type Tab = 'mongodb' | 'sql';
 
@@ -51,6 +53,7 @@ interface HistoryEntry {
 
 export default function DatabasesPage() {
   const user = useAuthStore((s) => s.user);
+  const currentModel = useAppStore((s) => s.currentModel);
   const isAdmin = user?.role === 'admin';
 
   const [activeTab, setActiveTab] = useState<Tab>('mongodb');
@@ -290,11 +293,23 @@ export default function DatabasesPage() {
         ? [{ table: sqlSelectedTable, columns: sqlSchema }]
         : sqlTables.map(t => ({ table: t }));
 
-      const res = await authFetch('/api/query/generate-sql', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question: aiPrompt, schema_context: schemaContext }),
-      });
+      const payload = JSON.stringify({ question: aiPrompt, schema_context: schemaContext, model: currentModel });
+      const reqHeaders = { 'Content-Type': 'application/json' };
+
+      let res: Response;
+      try {
+        res = await authFetch(`${STREAM_BASE}/query/generate-sql`, {
+          method: 'POST',
+          headers: reqHeaders,
+          body: payload,
+        });
+      } catch {
+        res = await authFetch('/api/query/generate-sql', {
+          method: 'POST',
+          headers: reqHeaders,
+          body: payload,
+        });
+      }
       
       if (!res.ok) {
         const contentType = res.headers.get('content-type');
@@ -302,7 +317,7 @@ export default function DatabasesPage() {
           const data = await res.json();
           setError(`AI Error: ${data.detail || 'Failed to generate SQL'}`);
         } else {
-          setError(`Timeout Error: The AI model took too long to respond. Please wait a moment and try again!`);
+          setError(`Error (${res.status}): The local AI model took too long to respond. Please wait a moment and try again.`);
         }
         setGeneratingSql(false);
         return;
@@ -315,7 +330,7 @@ export default function DatabasesPage() {
         setError('Received empty response from the AI model.');
       }
     } catch (err) {
-      setError(`Network connection failed. (${err instanceof Error ? err.message : 'Unknown error'})`);
+      setError(`Local server connection failed. Please ensure the local backend server is running on port 8000. (Note: No internet connection is needed — EurekaX operates 100% locally). Details: ${err instanceof Error ? err.message : 'Unknown error'}`);
     }
     setGeneratingSql(false);
   };

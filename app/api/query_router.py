@@ -45,6 +45,7 @@ class NL2SQLRequest(BaseModel):
     question: str = Field(..., min_length=1)
     dataset_name: Optional[str] = None
     schema_context: Optional[list] = None  # Frontend can pass explicit schema
+    model: Optional[str] = None
 
 
 # ── SQL ──
@@ -142,39 +143,72 @@ async def generate_sql(
     # If the frontend passes explicit schema context (e.g., selected from Schema Explorer)
     if body.schema_context:
         for table in body.schema_context:
-            schema_context += f"Table: {table.get('table_name')}\\n"
+            t_name = table.get("table_name") or table.get("table") or ""
+            if t_name:
+                schema_context += f"Table: {t_name}\n"
             columns = table.get("columns", [])
-            schema_context += f"Columns: {', '.join([c.get('name', '') + ' (' + c.get('type', '') + ')' for c in columns])}\\n\\n"
+            if columns:
+                if isinstance(columns[0], dict):
+                    col_strs = [c.get("name", "") + (f" ({c.get('type')})" if c.get("type") else "") for c in columns]
+                    schema_context += f"Columns: {', '.join(col_strs)}\n\n"
+                else:
+                    schema_context += f"Columns: {', '.join([str(c) for c in columns])}\n\n"
     else:
         # Fallback: scan catalog entries
         all_entries = await catalog_service.list_entries(db)
         for entry in all_entries:
             if body.dataset_name and body.dataset_name.lower() in entry["table_name"].lower():
-                schema_context += f"Table: {entry['table_name']}\\n"
+                schema_context += f"Table: {entry['table_name']}\n"
                 if entry.get("schema"):
-                    schema_context += f"Columns: {', '.join([c.get('name', '') for c in entry['schema']])}\\n"
-                schema_context += "\\n"
-            elif not body.dataset_name: # if no specific dataset, provide all (truncated if too many)
-                schema_context += f"Table: {entry['table_name']}\\n"
+                    schema_context += f"Columns: {', '.join([c.get('name', '') for c in entry['schema']])}\n"
+                schema_context += "\n"
+            elif not body.dataset_name:  # if no specific dataset, provide all (truncated if too many)
+                schema_context += f"Table: {entry['table_name']}\n"
+
+    # Select appropriate model:
+    # 1. If explicit coder model was requested, use it
+    # 2. If no model specified or general model requested, prioritize installed coder model for speed and accuracy
+    target_model = body.model
+    coder_model = None
+    try:
+        available_models = await ollama_service.list_models()
+        for m in available_models:
+            m_name = m.get("name", "").lower()
+            if "coder" in m_name or "code" in m_name:
+                coder_model = m["name"]
+                break
+    except Exception:
+        pass
+
+    if target_model and "coder" in target_model.lower():
+        selected_model = target_model
+    elif coder_model:
+        selected_model = coder_model
+    elif target_model:
+        selected_model = target_model
+    else:
+        selected_model = ollama_service.default_model
 
     prompt = (
-        "You are an expert SQL generator. Convert the following natural language request into a valid SQL query.\\n"
-        "Output ONLY the SQL query, nothing else, no markdown formatting (do not wrap in ```sql). \\n"
+        "You are an expert SQL generator. Convert the following natural language request into a valid SQL query.\n"
+        "Output ONLY the SQL query, nothing else, no markdown formatting (do not wrap in ```sql). Do not provide explanations.\n"
     )
     if schema_context:
-        prompt += f"Here are the available tables and columns for context:\\n{schema_context[:3000]}\\n"
+        prompt += f"Here are the available tables and columns for context:\n{schema_context[:3000]}\n"
         
     prompt += f"Request: {body.question}"
     
     try:
-        res = await ollama_service.generate(prompt=prompt, temperature=0.0)
-        sql = res["response"].strip()
-        # Clean markdown if the LLM didn't listen
-        sql = re.sub(r'^```sql\\s*|```\\s*$', '', sql, flags=re.IGNORECASE | re.MULTILINE).strip()
-        return {"sql": sql}
+        res = await ollama_service.generate(prompt=prompt, model=selected_model, temperature=0.0)
+        raw_output = res.get("response", "").strip()
+        # Clean markdown code blocks if the LLM wrapped it
+        sql = re.sub(r"^```sql\s*", "", raw_output, flags=re.IGNORECASE)
+        sql = re.sub(r"^```\s*", "", sql, flags=re.IGNORECASE)
+        sql = re.sub(r"\s*```$", "", sql, flags=re.IGNORECASE).strip()
+        return {"sql": sql, "model": selected_model}
     except Exception as e:
-        logger.error(f"Failed to generate SQL: {e}")
-        raise HTTPException(status_code=500, detail="Failed to generate SQL query from the prompt.")
+        logger.error(f"Failed to generate SQL with model {selected_model}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate SQL query: {str(e)}")
 
 
 # ── Database Schema Introspection ──

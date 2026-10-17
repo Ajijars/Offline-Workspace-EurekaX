@@ -40,6 +40,10 @@ class ChatRequest(BaseModel):
         le=2.0,
         description="Sampling temperature (0.0 = deterministic, 2.0 = creative)"
     )
+    images: list[str] = Field(
+        default_factory=list,
+        description="List of base64 encoded images for multi-modal vision tasks"
+    )
 
     model_config = {
         "json_schema_extra": {
@@ -136,6 +140,11 @@ class DocumentUploadResponse(BaseModel):
 # RAG – Query Schemas
 # ──────────────────────────────────────────────
 
+class DocumentCompareRequest(BaseModel):
+    doc1_id: str = Field(..., description="First document ID")
+    doc2_id: str = Field(..., description="Second document ID")
+    custom_prompt: str = Field(default="", description="Optional custom prompt for comparison")
+
 class SourceChunk(BaseModel):
     """A single retrieved source chunk from vector search."""
     chunk_text: str = Field(..., description="The text content of the chunk")
@@ -168,6 +177,10 @@ class RAGQueryRequest(BaseModel):
         ge=0.0,
         le=2.0,
         description="Sampling temperature"
+    )
+    conversation_history: list[dict] = Field(
+        default_factory=list,
+        description="List of past messages: [{'role': 'user', 'content': '...'}, ...]"
     )
 
     model_config = {
@@ -250,6 +263,22 @@ class AgentRequest(BaseModel):
     file_paths: list[str] = Field(
         default_factory=list,
         description="Paths to files uploaded for agent use"
+    )
+    conversation_history: list[dict] = Field(
+        default_factory=list,
+        description="List of past messages: [{'role': 'user', 'content': '...'}, ...]"
+    )
+    thread_id: str = Field(
+        default="default_thread",
+        description="Thread ID for Human-in-the-loop checkpointing"
+    )
+    resume: bool = Field(
+        default=False,
+        description="Set to true to resume a paused agent execution"
+    )
+    images: list[str] = Field(
+        default_factory=list,
+        description="List of base64 encoded images for multi-modal vision tasks"
     )
 
     model_config = {

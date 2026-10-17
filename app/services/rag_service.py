@@ -82,7 +82,8 @@ class RAGService:
         # Step 3: Generate embeddings
         logger.info(f"[RAG Ingest] Step 3: Generating embeddings")
         vectors = embedding_service.embed_texts(chunks)
-        logger.info(f"  → {len(vectors)} embeddings generated")
+        sparse_vectors = embedding_service.embed_sparse_texts(chunks)
+        logger.info(f"  → {len(vectors)} dense and sparse embeddings generated")
 
         # Step 4: Store in Qdrant
         logger.info(f"[RAG Ingest] Step 4: Storing in Qdrant")
@@ -90,9 +91,11 @@ class RAGService:
             doc_id=doc_result.doc_id,
             chunks=chunks,
             vectors=vectors,
+            sparse_vectors=sparse_vectors,
             metadata={
                 "filename": doc_result.filename,
                 "file_type": doc_result.file_type,
+                "file_path": doc_result.metadata.get("saved_path", ""),
                 "page_count": doc_result.page_count,
             }
         )
@@ -123,6 +126,7 @@ class RAGService:
         top_k: int | None = None,
         model: str | None = None,
         temperature: float = 0.7,
+        conversation_history: list[dict] | None = None,
     ) -> dict:
         """
         RAG query pipeline (non-streaming):
@@ -137,12 +141,14 @@ class RAGService:
         start_time = time.time()
         top_k = top_k or self.default_top_k
 
-        # Step 1: Embed query
+        # Step 1: Embed query (Dense + Sparse)
         query_vector = embedding_service.embed_query(question)
+        sparse_query_vector = embedding_service.embed_sparse_query(question)
 
         # Step 2: Search for relevant chunks
         search_results = await vector_service.search(
             query_vector=query_vector,
+            sparse_query_vector=sparse_query_vector,
             top_k=top_k
         )
 
@@ -156,7 +162,7 @@ class RAGService:
             }
 
         # Step 3: Build context-augmented prompt
-        context_prompt = self._build_rag_prompt(question, search_results)
+        context_prompt = self._build_rag_prompt(question, search_results, conversation_history)
 
         # Step 4: Generate answer with LLM
         result = await ollama_service.generate(
@@ -181,6 +187,7 @@ class RAGService:
         top_k: int | None = None,
         model: str | None = None,
         temperature: float = 0.7,
+        conversation_history: list[dict] | None = None,
     ) -> AsyncGenerator[str, None]:
         """
         RAG query pipeline with streaming response.
@@ -191,10 +198,12 @@ class RAGService:
 
         # Step 1: Embed query
         query_vector = embedding_service.embed_query(question)
+        sparse_query_vector = embedding_service.embed_sparse_query(question)
 
         # Step 2: Search for relevant chunks
         search_results = await vector_service.search(
             query_vector=query_vector,
+            sparse_query_vector=sparse_query_vector,
             top_k=top_k
         )
 
@@ -214,7 +223,7 @@ class RAGService:
             return
 
         # Step 3: Build context-augmented prompt
-        context_prompt = self._build_rag_prompt(question, search_results)
+        context_prompt = self._build_rag_prompt(question, search_results, conversation_history)
 
         # Step 4: Stream answer from LLM
         async for chunk in ollama_service.generate_stream(
@@ -253,7 +262,7 @@ class RAGService:
     # Helpers
     # ──────────────────────────────────────────────
 
-    def _build_rag_prompt(self, question: str, sources: list[dict]) -> str:
+    def _build_rag_prompt(self, question: str, sources: list[dict], history: list[dict] | None = None) -> str:
         """
         Build a context-augmented prompt for RAG.
 
@@ -271,17 +280,75 @@ class RAGService:
 
         context_block = "\n\n".join(context_parts)
 
+        history_block = ""
+        if history:
+            history_parts = []
+            for msg in history:
+                role = msg.get("role", "").capitalize()
+                content = msg.get("content", "")
+                if role and content:
+                    history_parts.append(f"{role}: {content}")
+            if history_parts:
+                history_block = "--- PREVIOUS CONVERSATION ---\n" + "\n".join(history_parts) + "\n\n"
+
         prompt = (
             "You are a knowledgeable assistant that answers questions based on the provided context. "
             "Use the following retrieved document excerpts to answer the user's question. "
             "If the context doesn't contain enough information, say so honestly. "
             "Always cite which source(s) you used.\n\n"
+            f"{history_block}"
             f"--- CONTEXT ---\n{context_block}\n--- END CONTEXT ---\n\n"
             f"Question: {question}\n\n"
             "Answer (cite your sources):"
         )
 
         return prompt
+        
+    async def compare_documents(self, doc1_id: str, doc2_id: str, custom_prompt: str = "") -> str:
+        """
+        Compare two documents by retrieving all their chunks and asking the LLM to map differences.
+        """
+        # 1. Fetch chunks for doc1
+        chunks1 = await vector_service.get_document_chunks(doc1_id)
+        if not chunks1:
+            return f"Error: Could not find document with ID {doc1_id}"
+            
+        # 2. Fetch chunks for doc2
+        chunks2 = await vector_service.get_document_chunks(doc2_id)
+        if not chunks2:
+            return f"Error: Could not find document with ID {doc2_id}"
+            
+        # Combine text (may be large, but local LLMs often handle 8k context)
+        text1 = "\n\n".join(chunks1)
+        text2 = "\n\n".join(chunks2)
+        
+        # Truncate slightly if massive (preventing context length overflow for 8k models)
+        MAX_CHARS = 12000
+        if len(text1) > MAX_CHARS:
+            text1 = text1[:MAX_CHARS] + "... (truncated)"
+        if len(text2) > MAX_CHARS:
+            text2 = text2[:MAX_CHARS] + "... (truncated)"
+            
+        instructions = custom_prompt if custom_prompt.strip() else "Please compare these two documents. Outline the key differences, commonalities, and any contradictions."
+        
+        prompt = (
+            "You are an expert document analyst. Below are the contents of two distinct documents.\n"
+            f"Instruction: {instructions}\n\n"
+            "--- DOCUMENT 1 ---\n"
+            f"{text1}\n\n"
+            "--- DOCUMENT 2 ---\n"
+            f"{text2}\n\n"
+            "Analysis:"
+        )
+        
+        logger.info(f"[RAG Compare] Comparing {doc1_id} and {doc2_id}")
+        
+        result = await ollama_service.generate(
+            prompt=prompt,
+            temperature=0.3
+        )
+        
+        return result["response"]
 
 
 # Singleton instance

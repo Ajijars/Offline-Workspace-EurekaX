@@ -20,9 +20,10 @@ export function useHealth() {
     // API + Ollama
     try {
       const data = await getHealth();
-      const ollamaOk = data.ollama === 'healthy';
-      const qdrantOk = !data.qdrant || data.qdrant === 'healthy';
-      const graphOk = !data.langgraph || data.langgraph === 'healthy';
+      const services = (data as unknown as { services?: Record<string, { status?: string }> }).services || {};
+      const ollamaOk = data.ollama === 'healthy' || services.ollama?.status === 'healthy';
+      const qdrantOk = data.qdrant === 'healthy' || services.qdrant?.status === 'healthy' || !services.qdrant;
+      const graphOk = data.langgraph === 'healthy' || services.langgraph?.status === 'healthy' || !services.langgraph;
       setHealth({
         api: 'healthy',
         ollama: ollamaOk ? 'healthy' : 'unhealthy',

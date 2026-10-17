@@ -22,6 +22,8 @@ import {
   GitBranch,
   Clock,
   Activity,
+  History,
+  Network,
 } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { useAuthStore } from '@/stores/authStore';
@@ -31,7 +33,7 @@ import { useDocuments } from '@/hooks/useDocuments';
 import type { ModelInfo } from '@/lib/types';
 import DocumentUpload from '@/components/rag/DocumentUpload';
 import DocumentList from '@/components/rag/DocumentList';
-import AgentFileUpload from '@/components/agent/AgentFileUpload';
+
 import ThemeToggle from '@/components/layout/ThemeToggle';
 
 export default function Sidebar() {
@@ -128,7 +130,7 @@ export default function Sidebar() {
             </div>
           </div>
         </Link>
-        <button className="icon-btn icon-btn-sm" onClick={clearMessages} title="New Chat">
+        <button className="icon-btn icon-btn-sm" onClick={() => clearMessages(mode)} title="New Chat">
           <Plus size={15} />
         </button>
       </div>
@@ -175,6 +177,10 @@ export default function Sidebar() {
               <LayoutDashboard size={15} />
               <span>Dashboard</span>
             </Link>
+            <Link href="/history" className="sidebar-nav-link">
+              <History size={15} />
+              <span>Chat History</span>
+            </Link>
             <Link href="/databases" className="sidebar-nav-link">
               <Database size={15} />
               <span>Databases</span>
@@ -199,6 +205,10 @@ export default function Sidebar() {
               <Activity size={15} />
               <span>Jobs Monitor</span>
             </Link>
+            <Link href="/okf" className="sidebar-nav-link">
+              <Network size={15} />
+              <span>Knowledge Graph</span>
+            </Link>
             {user?.role === 'admin' && (
               <>
                 <Link href="/security" className="sidebar-nav-link admin-link">
@@ -213,31 +223,16 @@ export default function Sidebar() {
                   <Shield size={15} />
                   <span>Admin Panel</span>
                 </Link>
+                <Link href="/monitoring" className="sidebar-nav-link admin-link">
+                  <Activity size={15} />
+                  <span>System Monitor</span>
+                </Link>
               </>
             )}
           </div>
         </div>
 
-        {/* RAG: Document Upload (visible in RAG mode) */}
-        {mode === 'rag' && (
-          <div className="sidebar-section">
-            <p className="section-label">Documents</p>
-            <DocumentUpload
-              onUpload={upload}
-              uploading={uploading}
-              uploadProgress={uploadProgress}
-            />
-            <DocumentList documents={documents} onDelete={remove} />
-          </div>
-        )}
-
-        {/* Agent: File Upload (visible in Agent mode) */}
-        {mode === 'agent' && (
-          <div className="sidebar-section">
-            <p className="section-label">Agent Files</p>
-            <AgentFileUpload />
-          </div>
-        )}
+        {/* RAG panel was moved to inline layout beside chat */}
 
         {/* Model Selector */}
         <div className="sidebar-section">

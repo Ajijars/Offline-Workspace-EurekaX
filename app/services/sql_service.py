@@ -86,7 +86,7 @@ class SQLService:
                 entries = await catalog_service.list_entries(db, source_id=source_name)
                 conn = sqlite3.connect(":memory:")
                 for entry in entries:
-                    file_path = Path("C:/SIH_Project/secure_storage/dataset") / entry["table_name"]
+                    file_path = Path(__file__).parent.parent.parent / "secure_storage" / "dataset" / entry["table_name"]
                     if file_path.exists():
                         df = pd.read_csv(file_path)
                         table_name = entry["table_name"].rsplit(".", 1)[0]

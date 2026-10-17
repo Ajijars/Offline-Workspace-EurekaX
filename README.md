@@ -1,4 +1,4 @@
-# SIH Local LLM Assistant
+# EurekaX Local LLM Assistant
 
 Offline assistant with three layers: local chat, document RAG, and a LangGraph multi-agent workflow.
 
@@ -40,7 +40,17 @@ If Docker is not running, the backend falls back to local file storage in `qdran
 python -m venv venv
 .\venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+#### TLS Configuration (Encrypted Connection)
+To enable HTTPS, generate local certificates using `mkcert`:
+```powershell
+mkcert -install
+mkcert localhost 127.0.0.1 ::1
+```
+Then start the server with SSL enabled:
+```powershell
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 --ssl-keyfile localhost-key.pem --ssl-certfile localhost.pem
 ```
 
 ### 4. Next.js UI
@@ -91,7 +101,7 @@ Swagger: http://localhost:8000/docs
 ## Project structure
 
 ```
-SIH_Project/
+EurekaX_Project/
 ├── app/
 │   ├── main.py
 │   ├── config.py

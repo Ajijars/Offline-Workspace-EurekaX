@@ -27,24 +27,32 @@ ENV/
 Thumbs.db
 desktop.ini
 
-# Environment
+# Environment / Secrets
+.env
 .env.local
 .env.production
+.env.*
 
-# Runtime data
+# Frontend
+node_modules/
+frontend/node_modules/
+.next/
+frontend/.next/
+out/
+frontend/out/
+
+# Runtime data / Databases
 uploads/
 sandbox/
 workspace/
 qdrant_data/
+data/
+eurekax.db
 
 # Logs
 *.log
 logs/
 
-# Runtime data
-uploads/
-workspace/
-sandbox/
-qdrant_data/
-data/
-eurekax.db
+# Scratch
+scratch/
+

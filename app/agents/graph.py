@@ -30,9 +30,11 @@ import logging
 from typing import Any
 
 from langgraph.graph import StateGraph, START, END
+from langgraph.checkpoint.memory import MemorySaver
 
 from app.agents.state import AgentState
 from app.agents.supervisor import supervisor_node, route_to_agent
+from app.agents.planner import planner_node
 from app.agents.rag_agent import rag_agent_node
 from app.agents.data_agent import data_agent_node
 from app.agents.file_agent import file_agent_node
@@ -70,6 +72,7 @@ def _build_graph() -> Any:
 
     # Nodes
     graph.add_node("supervisor", supervisor_node)
+    graph.add_node("planner", planner_node)
     graph.add_node("rag_agent", rag_agent_node)
     graph.add_node("data_agent", data_agent_node)
     graph.add_node("file_agent", file_agent_node)
@@ -80,10 +83,13 @@ def _build_graph() -> Any:
 
     # Entry point
     graph.add_edge(START, "supervisor")
+    
+    # Supervisor → Planner
+    graph.add_edge("supervisor", "planner")
 
-    # Conditional routing from supervisor → specialized agent
+    # Conditional routing from planner → specialized agent
     graph.add_conditional_edges(
-        "supervisor",
+        "planner",
         route_to_agent,
         {
             "rag_agent":    "rag_agent",
@@ -108,8 +114,12 @@ def _build_graph() -> Any:
 
     graph.add_edge("final_response", END)
 
-    return graph.compile()
-
+    # Use MemorySaver for Human-in-the-loop (HITL) checkpointing
+    memory = MemorySaver()
+    return graph.compile(
+        checkpointer=memory, 
+        interrupt_before=["file_agent", "code_agent"]
+    )
 
 # Singleton compiled graph (loaded once at import time)
 try:
@@ -124,15 +134,17 @@ except Exception as _e:
 # Public Workflow Runner
 # ──────────────────────────────────────────────
 
-def _initial_state(query: str, file_paths: list[str] | None) -> AgentState:
+def _initial_state(query: str, file_paths: list[str] | None, images: list[str] | None = None, history: list = None) -> AgentState:
     return {
-        "messages": [],
+        "messages": history or [],
         "user_query": query,
         "intent": "",
         "active_agent": "",
         "agent_steps": [],
         "final_answer": "",
         "file_paths": file_paths or [],
+        "images": images or [],
+        "plan": [],
         "error": None,
         "metadata": {},
     }
@@ -152,6 +164,9 @@ def _result_from_state(final_state: dict) -> dict:
 async def run_agent_workflow(
     query: str,
     file_paths: list[str] | None = None,
+    images: list[str] | None = None,
+    history: list = None,
+    thread_id: str = "default_thread",
 ) -> dict:
     """
     Run the full multi-agent workflow for a user query.
@@ -159,6 +174,7 @@ async def run_agent_workflow(
     Args:
         query:      The user's natural language question.
         file_paths: Optional list of uploaded file paths agents can access.
+        thread_id:  The thread identifier for checkpointer state.
 
     Returns:
         Dict with:
@@ -177,11 +193,12 @@ async def run_agent_workflow(
             "error": "Graph not compiled",
         }
 
-    initial_state = _initial_state(query, file_paths)
+    initial_state = _initial_state(query, file_paths, images, history)
+    config = {"configurable": {"thread_id": thread_id}}
 
     try:
         logger.info(f"[Workflow] Starting for query: {query[:80]!r}")
-        final_state = await agent_graph.ainvoke(initial_state)
+        final_state = await agent_graph.ainvoke(initial_state, config=config)
         return _result_from_state(final_state)
     except Exception as e:
         logger.error(f"[Workflow] Execution failed: {e}", exc_info=True)
@@ -191,20 +208,21 @@ async def run_agent_workflow(
             "active_agent": "none",
             "agent_steps": [],
             "error": str(e),
+            "metadata": {},
         }
 
 
 async def stream_agent_workflow(
     query: str,
     file_paths: list[str] | None = None,
+    images: list[str] | None = None,
+    history: list = None,
+    thread_id: str = "default_thread",
+    resume: bool = False,
 ):
     """
     Stream graph node updates as they complete.
-
-    Yields dicts:
-        {"type": "step", "step": {...}}
-        {"type": "answer", ...}  (final)
-        {"type": "error", ...}
+    Supports Human-in-the-loop (HITL) pause and resume.
     """
     if agent_graph is None:
         yield {
@@ -216,9 +234,13 @@ async def stream_agent_workflow(
 
     seen_steps = 0
     last_state: dict = {}
+    config = {"configurable": {"thread_id": thread_id}}
 
     try:
-        async for update in agent_graph.astream(_initial_state(query, file_paths)):
+        # If resuming, pass None to continue from the saved checkpoint
+        input_data = None if resume else _initial_state(query, file_paths, images, history)
+
+        async for update in agent_graph.astream(input_data, config=config):
             for _node, node_state in update.items():
                 if not isinstance(node_state, dict):
                     continue
@@ -227,6 +249,19 @@ async def stream_agent_workflow(
                 while seen_steps < len(steps):
                     yield {"type": "step", "step": steps[seen_steps]}
                     seen_steps += 1
+
+        # Check if the graph paused (HITL)
+        state = agent_graph.get_state(config)
+        if state.next:
+            pending = state.next[0]
+            logger.info(f"[Workflow] Paused before executing: {pending}")
+            yield {
+                "type": "paused",
+                "pending_node": pending,
+                "message": f"Paused for user approval before {pending} executes.",
+                "done": False,
+            }
+            return
 
         result = _result_from_state(last_state)
         yield {

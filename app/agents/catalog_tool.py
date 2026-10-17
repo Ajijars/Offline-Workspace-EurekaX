@@ -3,7 +3,10 @@ from app.db.database import async_session
 from app.services.catalog_service import catalog_service
 from app.services.sql_service import sql_service
 
-MYSQL_URL = "mysql+aiomysql://root:root@localhost:3307/mysql"
+from app.config import get_settings
+
+settings = get_settings()
+MYSQL_URL = settings.DATABASE_URL if hasattr(settings, 'DATABASE_URL') else "sqlite+aiosqlite:///data/eurekax.db"
 
 async def get_catalog_context() -> str:
     """Returns a string describing all tables in the Data Catalog."""

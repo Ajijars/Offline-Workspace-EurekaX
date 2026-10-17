@@ -15,6 +15,7 @@ export interface ChatRequest {
   conversation_history: Message[];
   model?: string | null;
   temperature: number;
+  images?: string[];
 }
 
 export interface ChatResponse {
@@ -78,6 +79,7 @@ export interface RAGQueryRequest {
   top_k: number;
   model?: string | null;
   temperature: number;
+  conversation_history?: { role: string; content: string }[];
 }
 
 export interface RAGQueryResponse {
@@ -127,6 +129,10 @@ export interface AgentFileInfo {
 export interface AgentRequest {
   query: string;
   file_paths: string[];
+  conversation_history?: { role: string; content: string }[];
+  thread_id?: string;
+  resume?: boolean;
+  images?: string[];
 }
 
 export interface AgentResponse {
@@ -166,11 +172,13 @@ export interface SSERAGChunk {
 }
 
 export interface SSEAgentChunk {
-  type: 'step' | 'answer' | 'error';
+  type: 'step' | 'answer' | 'error' | 'paused';
   step?: AgentStep;
   answer?: string;
   intent?: string;
   active_agent?: string;
+  pending_node?: string;
+  message?: string;
   done?: boolean;
   error?: string;
 }
@@ -204,4 +212,6 @@ export interface ChatMessage {
   activeAgent?: string;
   agentSteps?: AgentStep[];
   isStreaming?: boolean;
+  isPaused?: boolean;
+  pendingNode?: string;
 }

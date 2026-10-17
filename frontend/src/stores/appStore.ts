@@ -24,7 +24,7 @@ interface AppState {
   messages: ChatMessage[];
   addMessage: (msg: ChatMessage) => void;
   updateMessage: (id: string, patch: Partial<ChatMessage>) => void;
-  clearMessages: () => void;
+  clearMessages: (mode?: AppMode) => void;
   isStreaming: boolean;
   setIsStreaming: (v: boolean) => void;
 
@@ -66,7 +66,10 @@ export const useAppStore = create<AppState>((set) => ({
     set((s) => ({
       messages: s.messages.map((m) => (m.id === id ? { ...m, ...patch } : m)),
     })),
-  clearMessages: () => set({ messages: [] }),
+  clearMessages: (mode) =>
+    set((s) => ({
+      messages: mode ? s.messages.filter((m) => m.mode !== mode) : [],
+    })),
   isStreaming: false,
   setIsStreaming: (isStreaming) => set({ isStreaming }),
 

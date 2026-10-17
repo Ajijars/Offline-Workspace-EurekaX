@@ -7,7 +7,8 @@
  * Assistant messages: glass card, avatar, markdown content, optional stats/sources.
  */
 
-import { Layers } from 'lucide-react';
+import { useState, useCallback, useRef, useEffect } from 'react';
+import { Layers, Play, Square } from 'lucide-react';
 import type { ChatMessage } from '@/lib/types';
 import MarkdownRenderer from './MarkdownRenderer';
 import SourceChips from '@/components/rag/SourceChips';
@@ -15,9 +16,57 @@ import AgentTrace from '@/components/agent/AgentTrace';
 
 interface MessageBubbleProps {
   message: ChatMessage;
+  onApprove?: (id: string) => void;
 }
 
-export default function MessageBubble({ message }: MessageBubbleProps) {
+export default function MessageBubble({ message, onApprove }: MessageBubbleProps) {
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [userToggledOpen, setUserToggledOpen] = useState<boolean | null>(null);
+  const thinkContainerRef = useRef<HTMLDivElement>(null);
+
+  const toggleSpeech = useCallback(() => {
+    if (!('speechSynthesis' in window)) return;
+    
+    if (isPlaying) {
+      window.speechSynthesis.cancel();
+      setIsPlaying(false);
+    } else {
+      const textToSpeak = message.content
+        .replace(/```[\s\S]*?```/g, 'Code block omitted for brevity.')
+        .replace(/[#*`_]/g, '');
+
+      const utterance = new SpeechSynthesisUtterance(textToSpeak);
+      utterance.onend = () => setIsPlaying(false);
+      utterance.onerror = () => setIsPlaying(false);
+      window.speechSynthesis.speak(utterance);
+      setIsPlaying(true);
+    }
+  }, [message.content, isPlaying]);
+
+  // Parse `<think>` tags from reasoning models
+  const rawContent = message.content || '';
+  let thinkContent = '';
+  let mainContent = rawContent;
+
+  const thinkMatch = rawContent.match(/<think>([\s\S]*?)(<\/think>|$)/i);
+  if (thinkMatch) {
+    // Preserve trailing whitespace while streaming so words don't bunch up
+    thinkContent = message.isStreaming ? thinkMatch[1].replace(/^\s+/, '') : thinkMatch[1].trim();
+    const afterThink = rawContent.replace(/<think>[\s\S]*?(<\/think>|$)/i, '');
+    mainContent = message.isStreaming ? afterThink.replace(/^\s+/, '') : afterThink.trim();
+  }
+
+  // Auto-collapse think block only when streaming finishes (unless user toggled)
+  const isStillThinking = message.isStreaming && thinkContent && !mainContent;
+  const isThinkOpen = userToggledOpen !== null ? userToggledOpen : (message.isStreaming || !mainContent);
+
+  // Auto-scroll thinking container to bottom as words arrive live
+  useEffect(() => {
+    if (isStillThinking && thinkContainerRef.current) {
+      thinkContainerRef.current.scrollTop = thinkContainerRef.current.scrollHeight;
+    }
+  }, [thinkContent, isStillThinking]);
+
   if (message.role === 'user') {
     return (
       <div className="message user">
@@ -53,16 +102,63 @@ export default function MessageBubble({ message }: MessageBubbleProps) {
           )}
 
           {/* Answer */}
-          {message.content && (
+          {(thinkContent || mainContent) && (
             <div className="agent-answer">
-              <MarkdownRenderer content={message.content} />
+              {thinkContent && (
+                <details 
+                  className="think-block" 
+                  style={{ marginBottom: mainContent ? '12px' : '0' }}
+                  open={isThinkOpen}
+                  onToggle={(e) => setUserToggledOpen((e.target as HTMLDetailsElement).open)}
+                >
+                  <summary style={{ cursor: 'pointer', color: 'var(--text-muted)', fontSize: '0.85rem', userSelect: 'none' }}>
+                    <span style={{ marginLeft: 6 }}>
+                      {isStillThinking ? '🧠 Thinking...' : '▶ Thinking Process'}
+                    </span>
+                  </summary>
+                  <div ref={thinkContainerRef} style={{ marginTop: 8, padding: '8px 12px', borderLeft: '2px solid var(--border)', color: 'var(--text-secondary)', fontSize: '0.9rem', whiteSpace: 'pre-wrap', maxHeight: '300px', overflowY: 'auto' }}>
+                    {thinkContent}
+                    {isStillThinking && <span className="thinking-cursor">▌</span>}
+                  </div>
+                </details>
+              )}
+              {mainContent && <MarkdownRenderer content={mainContent} />}
+              
+              {!message.isStreaming && mainContent && (
+                <div style={{ marginTop: '8px', display: 'flex', justifyContent: 'flex-end' }}>
+                  <button
+                    onClick={toggleSpeech}
+                    className="action-btn"
+                    title={isPlaying ? "Stop speech" : "Read aloud"}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}
+                  >
+                    {isPlaying ? <Square size={14} /> : <Play size={14} />}
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
           {/* Streaming placeholder */}
-          {message.isStreaming && !message.content && (
-            <div className="agent-answer" style={{ opacity: 0.5 }}>
-              <span>Processing...</span>
+          {message.isStreaming && !thinkContent && !mainContent && (
+            <div className="agent-answer" style={{ opacity: 0.5, display: 'flex', gap: '4px', alignItems: 'center' }}>
+              <div className="typing-dot"></div><div className="typing-dot"></div><div className="typing-dot"></div>
+              <span style={{ marginLeft: 8 }}>Thinking...</span>
+            </div>
+          )}
+
+          {/* HITL Pause Action */}
+          {message.isPaused && (
+            <div className="hitl-actions" style={{ marginTop: '12px', padding: '12px', background: 'rgba(255, 165, 0, 0.1)', border: '1px solid orange', borderRadius: '8px' }}>
+              <p style={{ margin: '0 0 8px 0', color: 'orange', fontSize: '13px' }}>
+                ⚠️ Human-in-the-loop: Agent is paused and waiting for your approval to proceed with: <strong>{message.pendingNode}</strong>
+              </p>
+              <button
+                onClick={() => onApprove?.(message.id)}
+                style={{ background: 'orange', color: '#000', border: 'none', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
+              >
+                Approve & Continue
+              </button>
             </div>
           )}
         </div>
@@ -78,10 +174,32 @@ export default function MessageBubble({ message }: MessageBubbleProps) {
       </div>
       <div className="message-body">
         <div className="message-bubble">
-          {message.content ? (
-            <MarkdownRenderer content={message.content} />
-          ) : message.isStreaming ? (
-            <span style={{ opacity: 0.4 }}>Thinking...</span>
+          {thinkContent && (
+            <details 
+              className="think-block" 
+              style={{ marginBottom: mainContent ? '12px' : '0' }}
+              open={isThinkOpen}
+              onToggle={(e) => setUserToggledOpen((e.target as HTMLDetailsElement).open)}
+            >
+              <summary style={{ cursor: 'pointer', color: 'var(--text-muted)', fontSize: '0.85rem', userSelect: 'none' }}>
+                <span style={{ marginLeft: 6 }}>
+                  {isStillThinking ? '🧠 Thinking...' : '▶ Thinking Process'}
+                </span>
+              </summary>
+              <div ref={thinkContainerRef} style={{ marginTop: 8, padding: '8px 12px', borderLeft: '2px solid var(--border)', color: 'var(--text-secondary)', fontSize: '0.9rem', whiteSpace: 'pre-wrap', maxHeight: '300px', overflowY: 'auto' }}>
+                {thinkContent}
+                {isStillThinking && <span className="thinking-cursor">▌</span>}
+              </div>
+            </details>
+          )}
+
+          {mainContent ? (
+            <MarkdownRenderer content={mainContent} />
+          ) : message.isStreaming && !thinkContent ? (
+            <div className="typing-indicator-small" style={{ opacity: 0.5, display: 'flex', gap: '4px', alignItems: 'center' }}>
+              <div className="typing-dot"></div><div className="typing-dot"></div><div className="typing-dot"></div>
+              <span style={{ marginLeft: 8 }}>Thinking...</span>
+            </div>
           ) : null}
         </div>
 
@@ -104,6 +222,27 @@ export default function MessageBubble({ message }: MessageBubbleProps) {
             {message.sources && message.sources.length > 0 && (
               <span className="stat-item">📚 {message.sources.length} sources</span>
             )}
+            
+            <button
+              onClick={toggleSpeech}
+              title={isPlaying ? "Stop speech" : "Read aloud"}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', marginLeft: 'auto', display: 'flex', alignItems: 'center' }}
+            >
+              {isPlaying ? <Square size={14} /> : <Play size={14} />}
+            </button>
+          </div>
+        )}
+        
+        {/* Play button when no stats */}
+        {!message.stats && !message.isStreaming && message.content && (
+          <div className="message-stats" style={{ justifyContent: 'flex-end', marginTop: 8 }}>
+            <button
+              onClick={toggleSpeech}
+              title={isPlaying ? "Stop speech" : "Read aloud"}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', alignItems: 'center' }}
+            >
+              {isPlaying ? <Square size={14} /> : <Play size={14} />}
+            </button>
           </div>
         )}
       </div>

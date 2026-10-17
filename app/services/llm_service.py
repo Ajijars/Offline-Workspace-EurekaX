@@ -11,6 +11,7 @@ import logging
 from typing import AsyncGenerator
 
 import httpx
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from app.config import get_settings
 
@@ -25,16 +26,23 @@ class OllamaService:
         self.base_url = settings.OLLAMA_BASE_URL
         self.default_model = settings.OLLAMA_MODEL
         self.timeout = httpx.Timeout(
-            connect=10.0,     # 10s to establish connection
-            read=300.0,       # 300s to wait for response (first request loads model into memory)
-            write=10.0,
-            pool=10.0
+            connect=15.0,     # 15s to establish connection
+            read=600.0,       # 600s (10min) — first request loads model into VRAM
+            write=15.0,
+            pool=15.0
         )
+        # Force all model layers onto GPU (RTX 4050 / any NVIDIA GPU)
+        # 999 = offload every layer; Ollama caps at the model's actual layer count
+        self._gpu_options = {
+            "num_gpu": 999,
+            "main_gpu": 0,
+        }
 
     # ──────────────────────────────────────────────
     # Health & Discovery
     # ──────────────────────────────────────────────
 
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10), retry=retry_if_exception_type((httpx.ConnectError, httpx.TimeoutException)))
     async def check_health(self) -> bool:
         """Check if the Ollama server is running and reachable."""
         try:
@@ -45,6 +53,7 @@ class OllamaService:
             logger.warning(f"Ollama health check failed: {e}")
             return False
 
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10), retry=retry_if_exception_type((httpx.ConnectError, httpx.TimeoutException)))
     async def list_models(self) -> list[dict]:
         """List all models available in the local Ollama instance."""
         try:
@@ -70,12 +79,14 @@ class OllamaService:
     # Generation (Synchronous)
     # ──────────────────────────────────────────────
 
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10), retry=retry_if_exception_type((httpx.ConnectError, httpx.TimeoutException)))
     async def generate(
         self,
         prompt: str,
         model: str | None = None,
         conversation_history: list[dict] | None = None,
         temperature: float = 0.7,
+        tools: list[dict] | None = None,
     ) -> dict:
         """
         Generate a complete response from Ollama (non-streaming).
@@ -99,10 +110,14 @@ class OllamaService:
             "model": model,
             "messages": messages,
             "stream": False,
+            "keep_alive": -1,  # Keep permanently loaded in GPU VRAM (prevents cold-reload timeouts)
             "options": {
-                "temperature": temperature
+                "temperature": temperature,
+                **self._gpu_options,
             }
         }
+        if tools:
+            payload["tools"] = tools
 
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
@@ -128,6 +143,7 @@ class OllamaService:
 
             return {
                 "response": data.get("message", {}).get("content", ""),
+                "tool_calls": data.get("message", {}).get("tool_calls", []),
                 "model": model,
                 "total_duration_ms": round(elapsed_ms, 2),
                 "tokens_per_second": tokens_per_second
@@ -153,6 +169,7 @@ class OllamaService:
     # Generation (Streaming via SSE)
     # ──────────────────────────────────────────────
 
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10), retry=retry_if_exception_type((httpx.ConnectError, httpx.TimeoutException)))
     async def generate_stream(
         self,
         prompt: str,
@@ -173,10 +190,16 @@ class OllamaService:
             "model": model,
             "messages": messages,
             "stream": True,
+            "think": True,
+            "keep_alive": -1,  # Keep permanently loaded in GPU VRAM
             "options": {
-                "temperature": temperature
+                "temperature": temperature,
+                **self._gpu_options,
             }
         }
+
+        thinking_started = False
+        thinking_ended = False
 
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
@@ -191,13 +214,38 @@ class OllamaService:
                             try:
                                 data = json.loads(line)
                                 content = data.get("message", {}).get("content", "")
+                                thinking = data.get("message", {}).get("thinking", "")
                                 done = data.get("done", False)
+
+                                # Wrap thinking tokens in <think> tags for the frontend
+                                streamed_content = ""
+                                if thinking:
+                                    if not thinking_started:
+                                        streamed_content += "<think>"
+                                        thinking_started = True
+                                    streamed_content += thinking
+                                elif thinking_started and not thinking_ended:
+                                    # Thinking phase just ended, close the tag
+                                    streamed_content += "</think>"
+                                    thinking_ended = True
+
+                                if content:
+                                    # Close think tag if still open when content arrives
+                                    if thinking_started and not thinking_ended:
+                                        streamed_content += "</think>"
+                                        thinking_ended = True
+                                    streamed_content += content
+
                                 chunk = {
-                                    "content": content,
+                                    "content": streamed_content,
                                     "done": done,
                                     "model": model
                                 }
                                 if done:
+                                    # Close think tag if model ends while still thinking
+                                    if thinking_started and not thinking_ended:
+                                        chunk["content"] = "</think>" + content
+                                        thinking_ended = True
                                     # Include final timing stats
                                     eval_count = data.get("eval_count", 0)
                                     eval_duration = data.get("eval_duration", 0)
@@ -216,10 +264,14 @@ class OllamaService:
                 "done": True
             })
         except httpx.HTTPStatusError as e:
+            try:
+                error_detail = e.response.text
+            except Exception:
+                error_detail = f"HTTP {e.response.status_code}"
             error_msg = (
                 f"Model '{model}' not found. Pull it: 'ollama pull {model}'"
                 if e.response.status_code == 404
-                else f"Ollama error: {e.response.text}"
+                else f"Ollama error: {error_detail}"
             )
             yield json.dumps({"error": error_msg, "done": True})
         except Exception as e:

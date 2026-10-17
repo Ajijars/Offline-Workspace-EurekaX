@@ -5,7 +5,7 @@
  * FastAPI backend at http://localhost:8000 during development.
  */
 
-import { API_BASE } from './constants';
+import { API_BASE, STREAM_BASE } from './constants';
 import type {
   ChatRequest,
   ChatResponse,
@@ -53,7 +53,7 @@ export async function* streamChat(
   req: ChatRequest,
   signal?: AbortSignal,
 ): AsyncGenerator<Record<string, unknown>> {
-  const res = await fetch(`${API_BASE}/chat/stream`, {
+  const res = await fetch(`${STREAM_BASE}/chat/stream`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(req),
@@ -79,7 +79,9 @@ export async function getModels(): Promise<ModelsResponse> {
 export async function uploadDocument(file: File): Promise<DocumentUploadResponse> {
   const formData = new FormData();
   formData.append('file', file);
-  const res = await fetch(`${API_BASE}/rag/upload`, {
+  // Upload directly to backend to bypass Next.js dev proxy timeout (30s) for embeddings
+  const uploadUrl = typeof window !== 'undefined' ? `${STREAM_BASE}/rag/upload` : `${API_BASE}/rag/upload`;
+  const res = await fetch(uploadUrl, {
     method: 'POST',
     body: formData,
   });
@@ -102,7 +104,7 @@ export async function* streamRAGQuery(
   req: RAGQueryRequest,
   signal?: AbortSignal,
 ): AsyncGenerator<Record<string, unknown>> {
-  const res = await fetch(`${API_BASE}/rag/query/stream`, {
+  const res = await fetch(`${STREAM_BASE}/rag/query/stream`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(req),
@@ -133,7 +135,8 @@ export async function getRAGStats(): Promise<RAGStatsResponse> {
 export async function uploadAgentFile(file: File): Promise<AgentFileInfo> {
   const formData = new FormData();
   formData.append('file', file);
-  const res = await fetch(`${API_BASE}/agent/upload`, {
+  const uploadUrl = typeof window !== 'undefined' ? `${STREAM_BASE}/agent/upload` : `${API_BASE}/agent/upload`;
+  const res = await fetch(uploadUrl, {
     method: 'POST',
     body: formData,
   });
@@ -161,7 +164,7 @@ export async function* streamAgent(
   req: AgentRequest,
   signal?: AbortSignal,
 ): AsyncGenerator<Record<string, unknown>> {
-  const res = await fetch(`${API_BASE}/agent/run/stream`, {
+  const res = await fetch(`${STREAM_BASE}/agent/run/stream`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(req),

@@ -44,7 +44,12 @@ async def search_documents(query: str, top_k: int = 5) -> dict:
         from app.services.vector_service import vector_service
 
         query_vector = embedding_service.embed_query(query)
-        results = await vector_service.search(query_vector=query_vector, top_k=top_k)
+        sparse_query_vector = embedding_service.embed_sparse_query(query)
+        results = await vector_service.search(
+            query_vector=query_vector, 
+            sparse_query_vector=sparse_query_vector, 
+            top_k=top_k
+        )
 
         return {
             "success": True,
@@ -233,7 +238,7 @@ async def analyze_data(file_path: str) -> dict:
 # Python Sandbox Tool
 # ──────────────────────────────────────────────
 
-async def execute_python(code: str, timeout: int = 30, sandbox_dir: str = "sandbox") -> dict:
+async def execute_python(code: str, timeout: int = 120, sandbox_dir: str = "sandbox") -> dict:
     """
     Execute Python code in a Docker container sandbox (truly isolated).
 
@@ -243,7 +248,13 @@ async def execute_python(code: str, timeout: int = 30, sandbox_dir: str = "sandb
     - --read-only     : read-only root filesystem
     - --memory 256m   : memory cap
     - --cpus 0.5      : CPU cap
+    - --cap-drop=ALL  : drop all Linux capabilities
+    - --security-opt  : no-new-privileges
     - Container removed immediately after execution (--rm)
+
+    gVisor Upgrade Path:
+    If your host has gVisor installed, add `--runtime=runsc` to the docker_cmd list 
+    below for kernel-level isolation.
 
     Falls back to local subprocess if Docker daemon is unavailable.
     """
@@ -278,6 +289,10 @@ async def execute_python(code: str, timeout: int = 30, sandbox_dir: str = "sandb
                 "--memory", "256m",
                 "--cpus", "0.5",
                 "--read-only",
+                "--cap-drop=ALL",
+                "--security-opt", "no-new-privileges:true",
+                # Uncomment the next line if gVisor (runsc) is installed:
+                # "--runtime=runsc",
                 "--tmpfs", "/tmp:size=64m",
                 "-v", f"{abs_sandbox}:/sandbox:ro",
                 "--workdir", "/tmp",

@@ -74,6 +74,14 @@ class AuditService:
         result = await db.execute(query.offset(offset).limit(limit))
         logs = result.scalars().all()
 
+        def _parse_details(val):
+            if not val:
+                return None
+            try:
+                return json.loads(val)
+            except Exception:
+                return {"raw": val}
+
         return {
             "logs": [
                 {
@@ -82,7 +90,7 @@ class AuditService:
                     "action": log.action,
                     "resource_type": log.resource_type,
                     "resource_id": log.resource_id,
-                    "details": json.loads(log.details) if log.details else None,
+                    "details": _parse_details(log.details),
                     "ip_address": log.ip_address,
                     "timestamp": log.timestamp.isoformat() if log.timestamp else "",
                 }

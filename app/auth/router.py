@@ -17,7 +17,7 @@ Admin-only:
 import logging
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,6 +33,7 @@ from app.auth.security import (
 )
 from app.db.database import get_db
 from app.db.models import AuditLog, User
+from app.rate_limit import limiter
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +117,8 @@ async def _log_audit(
 
 
 @auth_router.post("/register", response_model=TokenResponse, status_code=201)
-async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
+@limiter.limit("5/minute")
+async def register(request: Request, body: RegisterRequest, db: AsyncSession = Depends(get_db)):
     """
     Create a new user account.
     The very first user registered is automatically promoted to admin.
@@ -156,7 +158,8 @@ async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
 
 
 @auth_router.post("/login", response_model=TokenResponse)
-async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
+@limiter.limit("10/minute")
+async def login(request: Request, body: LoginRequest, db: AsyncSession = Depends(get_db)):
     """Authenticate with email/username and password."""
     result = await db.execute(
         select(User).where(
@@ -188,10 +191,16 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
 async def refresh_token(body: RefreshRequest, db: AsyncSession = Depends(get_db)):
     """Exchange a valid refresh token for a new access + refresh token pair."""
     try:
+        from app.auth.security import revoke_token, is_token_revoked
+        if is_token_revoked(body.refresh_token):
+            raise HTTPException(status_code=401, detail="Refresh token already used")
+        
         payload = decode_token(body.refresh_token)
         if payload.get("type") != "refresh":
             raise HTTPException(status_code=401, detail="Invalid token type")
         user_id = payload.get("sub")
+    except HTTPException:
+        raise
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
 
@@ -199,6 +208,9 @@ async def refresh_token(body: RefreshRequest, db: AsyncSession = Depends(get_db)
     user = result.scalar_one_or_none()
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="User not found or deactivated")
+
+    # Invalidate the old refresh token (rotate)
+    revoke_token(body.refresh_token)
 
     access = create_access_token({"sub": user.id})
     refresh = create_refresh_token({"sub": user.id})

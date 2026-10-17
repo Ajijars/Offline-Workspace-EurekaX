@@ -8,7 +8,7 @@ both the code and its output.
 
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.agents.state import AgentState
 from app.agents.tools import execute_python
@@ -62,7 +62,7 @@ async def code_agent_node(state: AgentState) -> AgentState:
         "agent": "code_agent",
         "action": "code_generation",
         "result": "",
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
     try:
@@ -88,7 +88,7 @@ async def code_agent_node(state: AgentState) -> AgentState:
         # 2. Execute in sandbox
         exec_result = await execute_python(
             code=code,
-            timeout=30,
+            timeout=120,
             sandbox_dir=settings.SANDBOX_DIR,
         )
 

@@ -6,7 +6,7 @@ conversation, or anything that does not need RAG / data / files / code / vision.
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.agents.state import AgentState
 from app.services.llm_service import ollama_service
@@ -32,7 +32,7 @@ async def general_agent_node(state: AgentState) -> AgentState:
         "agent": "general_agent",
         "action": "llm_generate",
         "result": "",
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
     try:

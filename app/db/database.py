@@ -50,6 +50,8 @@ async def init_db() -> None:
     import app.services.pipeline_service  # noqa: F401 — Pipeline, PipelineRun
     import app.services.scheduler_service  # noqa: F401 — ScheduledJob
     import app.security.anomaly_detector  # noqa: F401 — SecurityAlert
+    import app.services.okf_service  # noqa: F401 — KnowledgePackage, KnowledgeNode, KnowledgeEdge
+    import app.services.conversation_service  # noqa: F401 — Conversation, Message
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -57,9 +59,16 @@ async def init_db() -> None:
 
 
 async def get_db() -> AsyncSession:
-    """FastAPI dependency — yields an async DB session."""
+    """FastAPI dependency — yields an async DB session with automatic rollback on failure.
+    
+    Routes are responsible for calling `await db.commit()` explicitly.
+    If an unhandled exception occurs, the session is automatically rolled back.
+    """
     async with async_session() as session:
         try:
             yield session
+        except Exception:
+            await session.rollback()
+            raise
         finally:
             await session.close()

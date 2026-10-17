@@ -1,5 +1,5 @@
 /**
- * SIH Local LLM Assistant – Frontend Application (Step 3: Multi-Agent)
+ * EurekaX Local LLM Assistant – Frontend Application (Step 3: Multi-Agent)
  * 
  * Handles chat interactions, SSE streaming, RAG document upload,
  * mode switching (Chat / RAG / Agent), agent execution traces, and health checks.

@@ -1,6 +1,6 @@
 """
-SIH Local LLM Assistant – Step 1: Local LLM Setup (Foundation)
-A FastAPI application that connects to Ollama for offline LLM inference.
+EurekaX Local LLM Assistant – Offline AI Workbench
+A FastAPI application with RAG, LangGraph agents, and governance.
 """
 
-__version__ = "1.0.0"
+__version__ = "4.0.0"

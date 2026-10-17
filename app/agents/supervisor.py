@@ -16,7 +16,7 @@ Intent Classes:
 import json
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.agents.state import AgentState
 from app.services.llm_service import ollama_service
@@ -67,7 +67,7 @@ async def supervisor_node(state: AgentState) -> AgentState:
         "agent": "supervisor",
         "action": "intent_classification",
         "result": "classifying…",
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
     try:

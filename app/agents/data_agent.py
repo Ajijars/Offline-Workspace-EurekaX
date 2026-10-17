@@ -9,7 +9,7 @@ Then has the LLM interpret the results and answer the user's question.
 import json
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.agents.state import AgentState
 from app.agents.tools import analyze_data, query_databricks
@@ -96,7 +96,7 @@ async def data_agent_node(state: AgentState) -> AgentState:
         "agent": "data_agent",
         "action": "data_analysis",
         "result": "",
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
     data_extensions = {".csv", ".json", ".xls", ".xlsx"}

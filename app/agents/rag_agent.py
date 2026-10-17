@@ -6,7 +6,7 @@ retrieve relevant document chunks and generate a grounded answer.
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.agents.state import AgentState
 from app.agents.tools import search_documents
@@ -40,14 +40,16 @@ async def rag_agent_node(state: AgentState) -> AgentState:
         "agent": "rag_agent",
         "action": "document_search",
         "result": "",
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
+
+    chunk_count = 0
 
     try:
         # 1. Search Qdrant
         search_result = await search_documents(query, top_k=5)
         chunks = search_result.get("results", [])
-        count = search_result.get("count", 0)
+        chunk_count = search_result.get("count", 0)
 
         if not chunks:
             answer = (
@@ -72,10 +74,10 @@ async def rag_agent_node(state: AgentState) -> AgentState:
             answer = result["response"]
 
             step["result"] = (
-                f"Found {count} relevant chunks from documents. "
+                f"Found {chunk_count} relevant chunks from documents. "
                 f"Sources: {list({c.get('filename') for c in chunks})}"
             )
-            step["action"] = f"document_search ({count} chunks retrieved)"
+            step["action"] = f"document_search ({chunk_count} chunks retrieved)"
 
     except Exception as e:
         logger.error(f"[RAG Agent] Error: {e}", exc_info=True)
@@ -87,5 +89,5 @@ async def rag_agent_node(state: AgentState) -> AgentState:
         "final_answer": answer,
         "active_agent": "rag_agent",
         "agent_steps": state.get("agent_steps", []) + [step],
-        "metadata": {**state.get("metadata", {}), "rag_chunks": len(chunks) if "chunks" in dir() else 0},
+        "metadata": {**state.get("metadata", {}), "rag_chunks": chunk_count},
     }

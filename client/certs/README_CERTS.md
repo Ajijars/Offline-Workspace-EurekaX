@@ -12,17 +12,17 @@ This certificate is needed so your browser/client trusts the server's HTTPS conn
 ### Method 1: Copy via USB / shared drive
 On the **server machine**, the cert is at:
 ```
-C:\SIH_Project\server\certs\ca.crt
+C:\EurekaX_Project\server\certs\ca.crt
 ```
 Copy it here:
 ```
-C:\SIH_Project\client\certs\ca.crt
+C:\EurekaX_Project\client\certs\ca.crt
 ```
 
 ### Method 2: Copy over network (SCP)
 ```bash
 # Run on client machine (replace SERVER_IP):
-scp user@192.168.1.100:C:/SIH_Project/server/certs/ca.crt ./certs/ca.crt
+scp user@192.168.1.100:C:/EurekaX_Project/server/certs/ca.crt ./certs/ca.crt
 ```
 
 ### Method 3: Via shared folder
